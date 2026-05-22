@@ -26,7 +26,7 @@ Source: "..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加选项:"
-Name: "startupicon"; Description: "开机自动启动"; GroupDescription: "附加选项:"; Flags: checked
+Name: "startupicon"; Description: "开机自动启动"; GroupDescription: "附加选项:"; Flags: checkedonce
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
