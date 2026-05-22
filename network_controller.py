@@ -5,6 +5,11 @@ import re
 import os
 import tempfile
 
+# 切换结果状态枚举
+SUCCESS = "success"
+GATEWAY_UNREACHABLE = "gateway_unreachable"
+FAILED = "failed"
+
 
 def _run_ps(command, timeout=10):
     """执行 PowerShell 命令，通过临时文件传递结果避免编码问题"""
@@ -108,14 +113,21 @@ def get_current_ip_config(adapter_ip=None):
     )
     config["dhcp"] = "True" in dhcp_content or "Enabled" in dhcp_content
 
+    # 网关
+    gw = get_gateway(adapter_ip)
+    if gw:
+        config["gateway"] = gw
+
     # DNS
     dns_content = _run_ps(
         f'Get-DnsClientServerAddress -InterfaceAlias "{adapter_name}" '
         f"| Select-Object -ExpandProperty ServerAddresses"
     )
-    dns_match = re.search(r"(\d+\.\d+\.\d+\.\d+)", dns_content)
-    if dns_match:
-        config["dns"] = dns_match.group(1)
+    dns_matches = re.findall(r"(\d+\.\d+\.\d+\.\d+)", dns_content)
+    if len(dns_matches) >= 1:
+        config["dns"] = dns_matches[0]
+    if len(dns_matches) >= 2:
+        config["dns_secondary"] = dns_matches[1]
 
     return config
 
@@ -150,65 +162,58 @@ def ping(host, timeout=3):
 
 
 def apply_profile(profile):
-    """应用网络方案。自动检测当前优先网卡。返回 (success, error_message)"""
-    # 自动检测网卡
+    """应用网络方案。返回 (status, message)，status 为 SUCCESS / GATEWAY_UNREACHABLE / FAILED"""
     adapter_ip = get_default_adapter_ip()
     if not adapter_ip:
-        return False, "未检测到网络连接"
+        return FAILED, "未检测到网络连接"
 
     adapter_name = get_adapter_name_by_ip(adapter_ip)
     if not adapter_name:
-        return False, "未检测到网卡"
+        return FAILED, "未检测到网卡"
 
-    # 记录当前配置用于回滚
     old_config = get_current_ip_config(adapter_ip)
 
     try:
-        # 应用 IP 配置
         if profile.get("ip_mode") == "dhcp":
             if not _run_netsh(["interface", "ip", "set", "address", adapter_name, "dhcp"]):
-                return False, "设置 DHCP 失败"
+                return FAILED, "设置 DHCP 失败"
         else:
             ip = profile.get("ip_address")
             mask = profile.get("subnet_mask")
             gateway = profile.get("gateway")
             if not all([ip, mask, gateway]):
-                return False, "IP 配置不完整"
+                return FAILED, "IP 配置不完整"
             if not _run_netsh(["interface", "ip", "set", "address", adapter_name, "static", ip, mask, gateway]):
-                return False, "设置静态 IP 失败"
+                return FAILED, "设置静态 IP 失败"
 
-        # 应用 DNS 配置
         if profile.get("dns_mode") == "auto":
             _run_netsh(["interface", "ip", "set", "dns", adapter_name, "dhcp"])
         else:
             primary = profile.get("dns_primary")
             secondary = profile.get("dns_secondary")
             if not primary:
-                return False, "DNS 配置不完整"
+                return FAILED, "DNS 配置不完整"
             _run_netsh(["interface", "ip", "set", "dns", adapter_name, "static", primary])
             if secondary:
                 _run_netsh(["interface", "ip", "add", "dns", adapter_name, secondary, "index=2"])
 
-        # 等待系统生效
         import time
         time.sleep(2)
 
-        # Ping 验证
         if profile.get("ip_mode") == "dhcp":
             gw = get_gateway()
             if gw and not ping(gw):
-                return True, "网关不通"
+                return GATEWAY_UNREACHABLE, "网关不通"
         else:
             gw = profile.get("gateway")
             if gw and not ping(gw):
-                return True, "网关不通"
+                return GATEWAY_UNREACHABLE, "网关不通"
 
-        return True, None
+        return SUCCESS, None
 
     except Exception as e:
-        # 回滚
         _rollback(adapter_name, old_config)
-        return False, str(e)
+        return FAILED, str(e)
 
 
 def _rollback(adapter_name, old_config):
@@ -226,6 +231,9 @@ def _rollback(adapter_name, old_config):
             dns = old_config.get("dns")
             if dns:
                 _run_netsh(["interface", "ip", "set", "dns", adapter_name, "static", dns])
+                dns2 = old_config.get("dns_secondary")
+                if dns2:
+                    _run_netsh(["interface", "ip", "add", "dns", adapter_name, dns2, "index=2"])
             else:
                 _run_netsh(["interface", "ip", "set", "dns", adapter_name, "dhcp"])
     except Exception:

@@ -6,12 +6,36 @@ from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor, QFont
 from PyQt6.QtCore import Qt, pyqtSignal
 
+# 图标背景色映射
+_ICON_COLORS = {
+    "normal":    QColor(0x0E, 0x74, 0x90),   # 深青色
+    "warning":   QColor(0xD9, 0x77, 0x06),   # 橙黄色
+    "error":     QColor(0xDC, 0x26, 0x26),   # 红色
+    "switching": QColor(0x0E, 0x74, 0x90),   # 切换中同正常色
+}
 
-# PyInstaller 打包后资源在临时目录，开发环境在脚本目录
+ICON_SIZE = 32
+
+
+def _make_icon_pixmap(color):
+    """用纯色背景 + 白色 N 字生成托盘图标"""
+    pixmap = QPixmap(ICON_SIZE, ICON_SIZE)
+    pixmap.fill(color)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    font = QFont("Arial", 16, QFont.Weight.Bold)
+    painter.setFont(font)
+    painter.setPen(QColor(255, 255, 255))
+    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "N")
+    painter.end()
+    return pixmap
+
+
+# PyInstaller 打包后资源在临时目录根，开发环境在 assets/ 目录
 if getattr(sys, 'frozen', False):
     _DIR = sys._MEIPASS
 else:
-    _DIR = os.path.dirname(os.path.abspath(__file__))
+    _DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 ICON_PATH = os.path.join(_DIR, "icon.ico")
 TRAY_16 = os.path.join(_DIR, "tray_16.png")
@@ -25,40 +49,29 @@ class TrayIcon(QSystemTrayIcon):
     open_main_window = pyqtSignal()
     quit_app = pyqtSignal()
     toggle_startup = pyqtSignal(bool)  # 开机自启开关
+    open_settings = pyqtSignal()       # 打开设置弹窗
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.profiles = []
         self.active_profile_id = "default"
-        self.status = "normal"  # normal / warning / error
+        self.status = "normal"
         self._startup_enabled = False
 
-        self._load_icon()
+        self.update_icon(self.status)
         self._build_menu()
         self.activated.connect(self._on_activated)
 
-    def _load_icon(self):
-        """加载图标文件"""
-        if os.path.exists(ICON_PATH):
-            self._icon = QIcon(ICON_PATH)
-        elif os.path.exists(TRAY_32):
-            self._icon = QIcon(TRAY_32)
-        else:
-            self._icon = self._generate_fallback()
-        self.setIcon(self._icon)
+    def update_icon(self, status):
+        """根据状态动态生成并设置托盘图标"""
+        color = _ICON_COLORS.get(status, _ICON_COLORS["normal"])
+        pixmap = _make_icon_pixmap(color)
+        self.setIcon(QIcon(pixmap))
 
-    def _generate_fallback(self):
-        """无图标文件时的备用方案"""
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(QColor(0x0E, 0x74, 0x90))
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        font = QFont("Arial", 16, QFont.Weight.Bold)
-        painter.setFont(font)
-        painter.setPen(QColor(255, 255, 255))
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "N")
-        painter.end()
-        return QIcon(pixmap)
+    def update_status(self, status):
+        self.status = status
+        self.update_icon(status)
+        self._update_tooltip()
 
     def _build_menu(self):
         self.menu = QMenu()
@@ -70,18 +83,13 @@ class TrayIcon(QSystemTrayIcon):
         self._rebuild_menu()
         self._update_tooltip()
 
-    def update_status(self, status):
-        self.status = status
-        # 图标文件不变，通过 tooltip 体现状态
-        self._update_tooltip()
-
     def _update_tooltip(self):
         active_name = "未选择方案"
         for p in self.profiles:
             if p["id"] == self.active_profile_id:
                 active_name = p["name"]
                 break
-        status_map = {"normal": "正常", "warning": "网关不通", "error": "切换失败"}
+        status_map = {"normal": "正常", "warning": "网关不通", "error": "切换失败", "switching": "切换中…"}
         status_text = status_map.get(self.status, "")
         tip = f"NetSwitch - {active_name}"
         if status_text:
@@ -119,6 +127,10 @@ class TrayIcon(QSystemTrayIcon):
             lambda checked: self.toggle_startup.emit(checked)
         )
         self.menu.addAction(startup_action)
+
+        settings_action = QAction("设置", self)
+        settings_action.triggered.connect(self.open_settings.emit)
+        self.menu.addAction(settings_action)
 
         self.menu.addSeparator()
 

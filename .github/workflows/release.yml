@@ -14,18 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: astral-sh/setup-uv@v5
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: uv sync
 
       - name: Generate icon
-        run: python generate_icon.py
+        run: uv run python scripts/generate_icon.py
 
       - name: Build exe
-        run: python build.py
+        run: uv run python scripts/build.py
 
       - name: Get version from tag
         id: version

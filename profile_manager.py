@@ -29,6 +29,8 @@ def get_default_config():
         "active_profile_id": "default",
         "start_with_windows": True,
         "restore_last_on_boot": False,
+        "window_x": None,
+        "window_y": None,
     }
 
 
@@ -96,6 +98,9 @@ def _detect_and_save_current_config(config):
 
         if dns:
             profile_data["dns_primary"] = dns
+            dns_secondary = ip_config.get("dns_secondary")
+            if dns_secondary:
+                profile_data["dns_secondary"] = dns_secondary
 
         config["profiles"].append(profile_data)
         config["active_profile_id"] = profile_data["id"]
@@ -183,10 +188,18 @@ def update_profile(config, profile_id, **kwargs):
 
 
 def delete_profile(config, profile_id):
-    """删除方案"""
+    """删除方案。返回 (success, message)。若方案处于激活状态，先切回 DHCP 再删除。"""
     profile = get_profile_by_id(config, profile_id)
     if not profile or profile.get("locked"):
-        return False
+        return False, "无法删除此方案"
+
+    # 如果要删除的是当前激活方案，先切回 DHCP
+    if config.get("active_profile_id") == profile_id and profile_id != "default":
+        import network_controller
+        default_profile = get_profile_by_id(config, "default")
+        status, msg = network_controller.apply_profile(default_profile)
+        if status == network_controller.FAILED:
+            return False, "当前方案激活中，切换回默认失败，无法删除"
 
     config["profiles"] = [p for p in config["profiles"] if p["id"] != profile_id]
 
@@ -194,7 +207,7 @@ def delete_profile(config, profile_id):
         config["active_profile_id"] = "default"
 
     save_config(config)
-    return True
+    return True, None
 
 
 def update_last_used(config, profile_id):
@@ -225,3 +238,15 @@ def set_restore_last_on_boot(config, enabled):
     """设置开机恢复方案"""
     config["restore_last_on_boot"] = enabled
     save_config(config)
+
+
+def save_window_position(config, x, y):
+    """保存主窗口位置"""
+    config["window_x"] = x
+    config["window_y"] = y
+    save_config(config)
+
+
+def get_window_position(config):
+    """获取保存的主窗口位置，返回 (x, y) 或 (None, None)"""
+    return config.get("window_x"), config.get("window_y")

@@ -8,7 +8,8 @@ import re
 
 def get_version():
     """从 VERSION 文件读取版本号"""
-    version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    version_path = os.path.join(project_root, "VERSION")
     with open(version_path, "r") as f:
         return f.read().strip()
 
@@ -75,30 +76,31 @@ def generate_installer_iss(version, project_dir):
 
 def build():
     version = get_version()
-    project_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
 
     # 生成版本信息文件
     vi_path = generate_version_info(version, project_dir)
 
     # 生成 installer.iss
-    iss_path = generate_installer_iss(version, project_dir)
+    iss_path = generate_installer_iss(version, scripts_dir)
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--windowed",
-        "--icon=icon.ico",
-        "--manifest=app.manifest",
+        "--icon=assets/icon.ico",
+        f"--manifest={scripts_dir}/app.manifest",
         "--name=NetSwitch",
-        "--add-data=icon.ico;.",
-        "--add-data=tray_16.png;.",
-        "--add-data=tray_32.png;.",
+        "--add-data=assets/icon.ico;.",
+        "--add-data=assets/tray_16.png;.",
+        "--add-data=assets/tray_32.png;.",
         "--add-data=VERSION;.",
         f"--version-file={vi_path}",
         "main.py",
     ]
 
-    print(f"打包 NetSwitch v{version} ...")
+    print(f"Building NetSwitch v{version} ...")
     result = subprocess.run(cmd, cwd=project_dir)
 
     # 清理临时文件
@@ -107,12 +109,12 @@ def build():
             os.remove(f)
 
     if result.returncode == 0:
-        print(f"\n打包成功！")
+        print(f"\nBuild succeeded!")
         print(f"  exe:  dist/NetSwitch.exe")
-        print(f"  安装脚本: {iss_path}")
-        print(f"\n制作安装包: iscc {iss_path}")
+        print(f"  installer script: {iss_path}")
+        print(f"\nTo build installer: iscc {iss_path}")
     else:
-        print("\n打包失败！")
+        print("\nBuild failed!")
         sys.exit(1)
 
 

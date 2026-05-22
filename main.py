@@ -22,7 +22,7 @@ import ctypes
 import ctypes.wintypes
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QThread, pyqtSignal
 
 import profile_manager
 import network_controller
@@ -51,6 +51,7 @@ def _try_bring_existing_window():
     target_title = APP_NAME
 
     found = []
+    GetWindowTextLengthW = user32.GetWindowTextLengthW
 
     def callback(hwnd, _lparam):
         if IsWindowVisible(hwnd):
@@ -62,7 +63,6 @@ def _try_bring_existing_window():
                     found.append(hwnd)
         return True
 
-    GetWindowTextLengthW = user32.GetWindowTextLengthW
     EnumWindows(EnumWindowsProc(callback), 0)
 
     if found:
@@ -87,6 +87,20 @@ def acquire_mutex():
     return handle, True
 
 
+# ── 后台线程：托盘切换方案 ──
+
+class _TrayApplyWorker(QThread):
+    finished = pyqtSignal(str, str, str)  # profile_id, status, error_message
+
+    def __init__(self, profile):
+        super().__init__()
+        self.profile = profile
+
+    def run(self):
+        status, error = network_controller.apply_profile(self.profile)
+        self.finished.emit(self.profile["id"], status, error or "")
+
+
 # ── 主应用 ──
 
 class NetSwitchApp:
@@ -103,6 +117,7 @@ class NetSwitchApp:
         self.tray.open_main_window.connect(self.show_main_window)
         self.tray.quit_app.connect(self.quit)
         self.tray.toggle_startup.connect(self._on_toggle_startup)
+        self.tray.open_settings.connect(self._on_open_settings)
         self.tray.show()
 
         # 主界面（延迟创建）
@@ -115,6 +130,9 @@ class NetSwitchApp:
         # 开机恢复方案
         if self.config.get("restore_last_on_boot"):
             self._restore_last_profile()
+
+        # 启动时执行一次网络状态检测，设置初始图标颜色
+        self._check_network_status()
 
         # 定时检查网络状态
         self._status_timer = QTimer()
@@ -147,21 +165,34 @@ class NetSwitchApp:
     def _restore_last_profile(self):
         active = profile_manager.get_active_profile(self.config)
         if active and active["id"] != "default":
-            success, _ = network_controller.apply_profile(active)
-            if success:
+            status, _ = network_controller.apply_profile(active)
+            if status != network_controller.FAILED:
                 profile_manager.update_last_used(self.config, active["id"])
 
     def _on_tray_profile_selected(self, profile_id):
         profile = profile_manager.get_profile_by_id(self.config, profile_id)
-        if profile:
-            success, error = network_controller.apply_profile(profile)
-            if success:
-                profile_manager.set_active_profile(self.config, profile_id)
-                profile_manager.update_last_used(self.config, profile_id)
-                self._update_tray()
-                self.tray.update_status("warning" if error else "normal")
+        if not profile:
+            return
+
+        self.tray.update_status("switching")
+
+        self._tray_worker = _TrayApplyWorker(profile)
+        self._tray_worker.finished.connect(self._on_tray_apply_finished)
+        self._tray_worker.start()
+
+    def _on_tray_apply_finished(self, profile_id, status, error):
+        if status == network_controller.FAILED:
+            self.tray.update_status("error")
+        else:
+            profile_manager.set_active_profile(self.config, profile_id)
+            profile_manager.update_last_used(self.config, profile_id)
+            self._update_tray()
+            if status == network_controller.GATEWAY_UNREACHABLE:
+                self.tray.update_status("warning")
             else:
-                self.tray.update_status("error")
+                self.tray.update_status("normal")
+
+        self._tray_worker = None
 
     def show_main_window(self):
         if not self.main_window:
@@ -226,6 +257,14 @@ class NetSwitchApp:
         self._set_start_with_windows(enabled)
         profile_manager.set_start_with_windows(self.config, enabled)
         self.tray.update_startup_state(enabled)
+
+    def _on_open_settings(self):
+        """打开设置弹窗"""
+        from settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self.config, parent=None)
+        dlg.startup_toggled.connect(self._on_toggle_startup)
+        if dlg.exec():
+            self.tray.update_startup_state(self._is_startup_enabled())
 
     def run(self):
         return self.app.exec()

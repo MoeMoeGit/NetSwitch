@@ -1,6 +1,5 @@
 """主界面模块 - 自定义无边框窗口、卡片列表、状态栏、操作按钮"""
 
-import time
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
@@ -9,7 +8,10 @@ from PyQt6.QtWidgets import (
     QApplication,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint, QThread
-from PyQt6.QtGui import QFont, QColor, QPainter, QPainterPath, QAction, QPen, QBrush
+from PyQt6.QtGui import (
+    QFont, QColor, QPainter, QPainterPath, QAction, QPen, QBrush,
+    QGuiApplication,
+)
 
 import profile_manager
 import network_controller
@@ -34,15 +36,15 @@ COLOR_RED_HOVER = "#C42B1C"
 
 # ── 后台线程：执行方案切换 ──
 class _ApplyWorker(QThread):
-    finished = pyqtSignal(bool, str)  # success, message
+    finished = pyqtSignal(str, str)  # status, message
 
     def __init__(self, profile):
         super().__init__()
         self.profile = profile
 
     def run(self):
-        success, error = network_controller.apply_profile(self.profile)
-        self.finished.emit(success, error or "")
+        status, error = network_controller.apply_profile(self.profile)
+        self.finished.emit(status, error or "")
 
 
 # ── 卡片组件 ──
@@ -81,8 +83,13 @@ class ProfileCard(QWidget):
         self._is_selected = selected
         self._update_style()
 
-    def show_result(self, success):
-        self._result_text = "✓ 成功" if success else "✗ 失败，已回滚"
+    def show_result(self, success, message=""):
+        if success:
+            self._result_text = "✓ 成功"
+        elif message:
+            self._result_text = f"✗ {message}"
+        else:
+            self._result_text = "✗ 失败，已回滚"
         self._result_timer.start(2000)
         self._update_style()
 
@@ -295,6 +302,7 @@ class MainWindow(QWidget):
 
         self._build_ui()
         self._load_cards()
+        self._restore_position()
 
         # 定时刷新状态栏
         self._status_timer = QTimer(self)
@@ -498,11 +506,6 @@ class MainWindow(QWidget):
         self.btn_activate.setEnabled(self._selected_id is not None and not is_active)
         self.btn_delete.setEnabled(self._selected_id is not None and not is_locked)
 
-    def _on_card_clicked(self, profile_id):
-        self._selected_id = profile_id
-        self._update_selection()
-        self._update_buttons()
-
     def _on_new(self):
         self._open_edit_dialog(None)
 
@@ -522,7 +525,10 @@ class MainWindow(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            profile_manager.delete_profile(self.config, profile_id)
+            success, msg = profile_manager.delete_profile(self.config, profile_id)
+            if not success:
+                QMessageBox.warning(self, "无法删除", msg)
+                return
             if self._selected_id == profile_id:
                 self._selected_id = None
             self._load_cards()
@@ -542,27 +548,26 @@ class MainWindow(QWidget):
 
         self._apply_worker = _ApplyWorker(profile)
         self._apply_worker.finished.connect(
-            lambda success, msg: self._on_apply_finished(profile, success, msg)
+            lambda status, msg: self._on_apply_finished(profile, status, msg)
         )
         self._apply_worker.start()
 
-    def _on_apply_finished(self, profile, success, message):
+    def _on_apply_finished(self, profile, status, message):
         self.btn_activate.setText("激活")
         self._update_buttons()
 
-        if success:
-            profile_manager.set_active_profile(self.config, profile["id"])
-            profile_manager.update_last_used(self.config, profile["id"])
-            self.profile_applied.emit(profile["id"])
-            self._load_cards()
-        else:
-            # 显示失败结果
+        if status == network_controller.FAILED:
             for i in range(self._card_layout.count()):
                 item = self._card_layout.itemAt(i)
                 card = item.widget()
                 if isinstance(card, ProfileCard) and card.profile_id == profile["id"]:
-                    card.show_result(False)
+                    card.show_result(False, message)
                     break
+        else:
+            profile_manager.set_active_profile(self.config, profile["id"])
+            profile_manager.update_last_used(self.config, profile["id"])
+            self.profile_applied.emit(profile["id"])
+            self._load_cards()
 
         self._apply_worker = None
 
@@ -598,6 +603,7 @@ class MainWindow(QWidget):
             self._status_label.setText("当前 —  检测失败")
 
     def _on_close(self):
+        self._save_position()
         self.hide()
         self.window_closed.emit()
 
@@ -625,3 +631,58 @@ class MainWindow(QWidget):
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+
+    # ── 窗口位置记忆 ──
+
+    def _restore_position(self):
+        x, y = profile_manager.get_window_position(self.config)
+        if x is None or y is None:
+            return
+
+        # 校验坐标在当前任意屏幕范围内
+        for screen in QGuiApplication.screens():
+            geo = screen.availableGeometry()
+            if geo.contains(x, y):
+                self.move(x, y)
+                return
+
+    def _save_position(self):
+        pos = self.pos()
+        profile_manager.save_window_position(self.config, pos.x(), pos.y())
+
+    # ── 键盘快捷键 ──
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            if self._selected_id is not None:
+                active_id = self.config.get("active_profile_id", "default")
+                if self._selected_id != active_id:
+                    self._on_activate()
+
+        elif event.key() == Qt.Key.Key_Delete:
+            if self._selected_id is not None:
+                profile = profile_manager.get_profile_by_id(self.config, self._selected_id)
+                if profile and not profile.get("locked"):
+                    self._on_delete_click()
+
+        elif event.key() == Qt.Key.Key_Escape:
+            if self._selected_id is not None:
+                self._selected_id = None
+                self._update_selection()
+                self._update_buttons()
+            else:
+                self._on_close()
+
+        elif event.key() == Qt.Key.Key_F2:
+            if self._selected_id is not None:
+                profile = profile_manager.get_profile_by_id(self.config, self._selected_id)
+                if profile and not profile.get("locked"):
+                    for i in range(self._card_layout.count()):
+                        item = self._card_layout.itemAt(i)
+                        card = item.widget()
+                        if isinstance(card, ProfileCard) and card.profile_id == self._selected_id:
+                            card.start_rename()
+                            break
+
+        else:
+            super().keyPressEvent(event)

@@ -68,7 +68,7 @@ def generate_icon(size=256):
 def main():
     import os
 
-    output_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
     # 生成各尺寸
     sizes = [16, 32, 48, 256]
@@ -78,7 +78,7 @@ def main():
         images[s] = img
         png_path = os.path.join(output_dir, f"icon_{s}.png")
         img.save(png_path)
-        print(f"已生成: icon_{s}.png")
+        print(f"Generated: icon_{s}.png")
 
     # 打包成 icon.ico（包含全部四个尺寸）
     ico_path = os.path.join(output_dir, "icon.ico")
@@ -88,13 +88,13 @@ def main():
         sizes=[(s, s) for s in sizes],
         append_images=[images[s] for s in sizes if s != 256],
     )
-    print(f"已生成: icon.ico")
+    print(f"Generated: icon.ico")
 
     # 托盘用 PNG
     for s in [16, 32]:
         tray_path = os.path.join(output_dir, f"tray_{s}.png")
         images[s].save(tray_path)
-        print(f"已生成: tray_{s}.png")
+        print(f"Generated: tray_{s}.png")
 
     # 清理中间 PNG（保留 tray 用的和 ico）
     for s in sizes:
@@ -102,10 +102,10 @@ def main():
         if os.path.exists(png_path):
             os.remove(png_path)
 
-    print("\n完成！生成文件：")
-    print(f"  - icon.ico（多尺寸）")
-    print(f"  - tray_16.png（托盘）")
-    print(f"  - tray_32.png（托盘）")
+    print("\nDone! Generated files:")
+    print(f"  - icon.ico (multi-size)")
+    print(f"  - tray_16.png (tray)")
+    print(f"  - tray_32.png (tray)")
 
 
 if __name__ == "__main__":

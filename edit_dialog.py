@@ -80,6 +80,7 @@ class EditDialog(QDialog):
         self.edit_mask_custom = QLineEdit()
         self.edit_mask_custom.setPlaceholderText("255.255.255.0")
         self.edit_mask_custom.setVisible(False)
+        self.edit_mask_custom.textChanged.connect(self._validate)
         self.combo_mask.currentIndexChanged.connect(self._on_mask_changed)
         mask_layout = QVBoxLayout()
         mask_layout.setSpacing(2)
@@ -212,6 +213,13 @@ class EditDialog(QDialog):
             else:
                 self.edit_ip.setStyleSheet("")
 
+            if self.combo_mask.currentIndex() == 3:
+                if not network_controller.validate_ipv4(self.edit_mask_custom.text()):
+                    self.edit_mask_custom.setStyleSheet("border: 1px solid red;")
+                    valid = False
+                else:
+                    self.edit_mask_custom.setStyleSheet("")
+
             if not network_controller.validate_ipv4(self.edit_gateway.text()):
                 self.edit_gateway.setStyleSheet("border: 1px solid red;")
                 valid = False
@@ -292,6 +300,11 @@ class EditDialog(QDialog):
             ]:
                 if not network_controller.validate_ipv4(field.text()):
                     QMessageBox.warning(self, "提示", f"{name} 格式不正确")
+                    return False
+
+            if self.combo_mask.currentIndex() == 3:
+                if not network_controller.validate_ipv4(self.edit_mask_custom.text()):
+                    QMessageBox.warning(self, "提示", "子网掩码格式不正确")
                     return False
 
         if self.radio_dns_manual.isChecked():

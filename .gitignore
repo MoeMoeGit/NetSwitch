@@ -4,8 +4,20 @@ __pycache__/
 *$py.class
 *.so
 .Python
+*.egg
+*.egg-info/
 venv/
+.venv/
 ENV/
+.env
+.env.*
+
+# Testing
+.pytest_cache/
+
+# Type checking / Linting
+.mypy_cache/
+.ruff_cache/
 
 # PyInstaller
 build/
@@ -24,4 +36,8 @@ Thumbs.db
 
 # 构建生成的临时文件
 version_info.txt
+installer_output/
 installer_output.iss
+
+# Logs
+*.log
