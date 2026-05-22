@@ -1,0 +1,6 @@
+# 运行时依赖
+PyQt6
+
+# 仅构建时需要（打包/生成图标）
+pyinstaller
+Pillow
