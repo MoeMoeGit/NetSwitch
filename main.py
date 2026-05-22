@@ -1,9 +1,23 @@
 """NetSwitch - Windows 系统托盘网络配置切换工具"""
 
-__version__ = "1.0.0"
-
 import sys
 import os
+
+
+def _read_version():
+    """从 VERSION 文件读取版本号"""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(base, "VERSION"), "r") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return "0.0.0"
+
+
+__version__ = _read_version()
 import ctypes
 import ctypes.wintypes
 

@@ -2,7 +2,7 @@
 ; 编译前先运行: python generate_icon.py && python build.py
 
 #define MyAppName "NetSwitch"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "{{VERSION}}"
 #define MyAppExeName "NetSwitch.exe"
 
 [Setup]

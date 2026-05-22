@@ -22,5 +22,6 @@ dist/
 .DS_Store
 Thumbs.db
 
-# 临时文件
+# 构建生成的临时文件
 version_info.txt
+installer_output.iss
