@@ -88,6 +88,33 @@ def acquire_mutex():
     return handle, True
 
 
+# ── 管理员权限 ──
+
+def _is_running_as_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _relaunch_as_admin():
+    if getattr(sys, 'frozen', False):
+        executable = sys.executable
+        params = ""
+    else:
+        executable = sys.executable
+        script = os.path.abspath(sys.argv[0])
+        params = " ".join([f'"{script}"'] + [f'"{arg}"' for arg in sys.argv[1:]])
+
+    try:
+        result = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", executable, params, None, 1
+        )
+        return result > 32
+    except Exception:
+        return False
+
+
 # ── 后台线程：托盘切换方案 ──
 
 class _TrayApplyWorker(QThread):
@@ -100,6 +127,27 @@ class _TrayApplyWorker(QThread):
     def run(self):
         status, error = network_controller.apply_profile(self.profile)
         self.finished.emit(self.profile["id"], status, error or "")
+
+
+# ── 后台线程：网络状态检测 ──
+
+class _StatusCheckWorker(QThread):
+    finished = pyqtSignal(str, object, object)  # status, adapter_ip, gateway
+
+    def run(self):
+        adapter_ip = network_controller.get_default_adapter_ip()
+        gateway = None
+
+        if adapter_ip:
+            gateway = network_controller.get_gateway(adapter_ip)
+            if gateway and network_controller.ping(gateway):
+                status = "normal"
+            else:
+                status = "warning"
+        else:
+            status = "warning"
+
+        self.finished.emit(status, adapter_ip, gateway)
 
 
 # ── 主应用 ──
@@ -119,26 +167,28 @@ class NetSwitchApp:
         self.tray.quit_app.connect(self.quit)
         self.tray.toggle_startup.connect(self._on_toggle_startup)
         self.tray.open_settings.connect(self._on_open_settings)
+        self.tray.refresh_status_requested.connect(self._check_network_status)
+        self.tray.update_startup_state(self._is_startup_enabled())
         self.tray.show()
 
         # 主界面（延迟创建）
         self.main_window = None
+        self._last_network_snapshot = {
+            "status": "warning",
+            "ip": None,
+            "gateway": None,
+        }
+        self._status_worker = None
 
         # 更新托盘（含开机自启状态）
         self._update_tray()
-        self.tray.update_startup_state(self._is_startup_enabled())
 
         # 开机恢复方案
         if self.config.get("restore_last_on_boot"):
             self._restore_last_profile()
 
         # 启动时执行一次网络状态检测，设置初始图标颜色
-        self._check_network_status()
-
-        # 定时检查网络状态
-        self._status_timer = QTimer()
-        self._status_timer.timeout.connect(self._check_network_status)
-        self._status_timer.start(30000)
+        QTimer.singleShot(0, self._check_network_status)
 
     def _update_tray(self):
         profiles = profile_manager.get_profiles(self.config)
@@ -150,22 +200,23 @@ class NetSwitchApp:
         if not active:
             return
 
-        adapter_ip = network_controller.get_default_adapter_ip()
-        if adapter_ip:
-            gateway = network_controller.get_gateway(adapter_ip)
-            if gateway:
-                if network_controller.ping(gateway):
-                    status = "normal"
-                else:
-                    status = "warning"
-            else:
-                status = "warning"
-        else:
-            status = "warning"
+        if self._status_worker and self._status_worker.isRunning():
+            return
 
+        self._status_worker = _StatusCheckWorker()
+        self._status_worker.finished.connect(self._on_status_check_finished)
+        self._status_worker.start()
+
+    def _on_status_check_finished(self, status, adapter_ip, gateway):
+        self._last_network_snapshot = {
+            "status": status,
+            "ip": adapter_ip,
+            "gateway": gateway,
+        }
         self.tray.update_status(status)
         if self.main_window:
-            self.main_window.set_network_status(status)
+            self.main_window.update_network_snapshot(self._last_network_snapshot)
+        self._status_worker = None
 
     def _restore_last_profile(self):
         active = profile_manager.get_active_profile(self.config)
@@ -204,6 +255,7 @@ class NetSwitchApp:
                 self.tray.update_status("normal")
                 if self.main_window:
                     self.main_window.set_network_status("normal")
+            self._check_network_status()
 
         self._tray_worker = None
 
@@ -217,6 +269,8 @@ class NetSwitchApp:
         self.main_window.show()
         self.main_window.raise_()
         self.main_window.activateWindow()
+        self.main_window.update_network_snapshot(self._last_network_snapshot)
+        self._check_network_status()
 
     def _on_profile_applied(self, profile_id):
         self._update_tray()
@@ -288,6 +342,21 @@ class NetSwitchApp:
 
 
 def main():
+    if not _is_running_as_admin():
+        if _relaunch_as_admin():
+            sys.exit(0)
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            app = QApplication(sys.argv)
+            QMessageBox.critical(
+                None,
+                APP_NAME,
+                "NetSwitch 需要管理员权限才能修改网络配置。",
+            )
+        except Exception:
+            pass
+        sys.exit(1)
+
     # 单实例检测
     mutex_handle, is_first = acquire_mutex()
     if not is_first:

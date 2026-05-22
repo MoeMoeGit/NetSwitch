@@ -318,10 +318,11 @@ class MainWindow(QWidget):
         self._load_cards()
         self._restore_position()
 
-        # 定时刷新状态栏
-        self._status_timer = QTimer(self)
-        self._status_timer.timeout.connect(self._refresh_status_bar)
-        self._status_timer.start(15000)
+        self._network_snapshot = {
+            "status": "warning",
+            "ip": None,
+            "gateway": None,
+        }
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -453,9 +454,6 @@ class MainWindow(QWidget):
         bot_layout.addWidget(self.btn_activate)
 
         vbox.addWidget(bottom)
-
-        # 初始刷新状态栏
-        QTimer.singleShot(500, self._refresh_status_bar)
 
     def _make_separator(self):
         line = QWidget()
@@ -634,19 +632,19 @@ class MainWindow(QWidget):
         self._load_cards()
         self.profile_saved.emit()
 
-    def _refresh_status_bar(self):
-        try:
-            ip = network_controller.get_default_adapter_ip()
-            if ip:
-                gw = network_controller.get_gateway(ip)
-                self._status_label.setText(
-                    f"当前 —  {ip}   网关 {gw or '—'}"
-                )
-            else:
-                self._status_label.setText("当前 —  未检测到网络")
-                self._status_dot.setStyleSheet(f"color: #F44336; font-size: 8px;")
-        except Exception:
-            self._status_label.setText("当前 —  检测失败")
+    def update_network_snapshot(self, snapshot):
+        """由主程序推送当前网络状态快照。"""
+        self._network_snapshot = snapshot or {}
+        status = self._network_snapshot.get("status", "warning")
+        ip = self._network_snapshot.get("ip")
+        gateway = self._network_snapshot.get("gateway")
+
+        if ip:
+            self._status_label.setText(f"当前 —  {ip}   网关 {gateway or '—'}")
+        else:
+            self._status_label.setText("当前 —  未检测到网络")
+
+        self.set_network_status(status)
 
     def set_network_status(self, status):
         """由主程序调用，同步网络状态到状态栏 dot 颜色"""
@@ -661,7 +659,6 @@ class MainWindow(QWidget):
 
     def _on_close(self):
         self._save_position()
-        self._status_timer.stop()
         self.hide()
         self.window_closed.emit()
 
@@ -671,9 +668,8 @@ class MainWindow(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._status_timer.start(15000)
         self._load_cards()
-        self._refresh_status_bar()
+        self.update_network_snapshot(self._network_snapshot)
 
     # ── 窗口拖动 ──
     def mousePressEvent(self, event):

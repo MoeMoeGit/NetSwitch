@@ -50,6 +50,7 @@ class TrayIcon(QSystemTrayIcon):
     quit_app = pyqtSignal()
     toggle_startup = pyqtSignal(bool)  # 开机自启开关
     open_settings = pyqtSignal()       # 打开设置弹窗
+    refresh_status_requested = pyqtSignal()  # 托盘菜单打开前刷新状态
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -75,6 +76,7 @@ class TrayIcon(QSystemTrayIcon):
 
     def _build_menu(self):
         self.menu = QMenu()
+        self.menu.aboutToShow.connect(self.refresh_status_requested.emit)
         self.setContextMenu(self.menu)
 
     def update_profiles(self, profiles, active_profile_id):
@@ -99,6 +101,7 @@ class TrayIcon(QSystemTrayIcon):
     def update_startup_state(self, enabled):
         """更新开机自启状态（由主程序调用）"""
         self._startup_enabled = enabled
+        self._rebuild_menu()
 
     def _rebuild_menu(self):
         self.menu.clear()
