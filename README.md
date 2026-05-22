@@ -1,6 +1,6 @@
 # NetSwitch
 
-> Windows 系统托盘网络配置切换工具 — 右键托盘，一键切网。
+> Windows 系统托盘网络配置切换工具 — 多套 IP/网关/DNS 配置，一键切网。
 
 ![NetSwitch 主界面](assets/screenshot.png)
 
