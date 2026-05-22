@@ -3,7 +3,6 @@
 import subprocess
 import sys
 import os
-import re
 
 
 def get_version():
@@ -60,15 +59,15 @@ VSVersionInfo(
     return path
 
 
-def generate_installer_iss(version, project_dir):
+def generate_installer_iss(version, scripts_dir):
     """从模板生成 installer.iss"""
-    template_path = os.path.join(project_dir, "installer.iss")
+    template_path = os.path.join(scripts_dir, "installer.iss")
     with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
 
     content = template.replace("{{VERSION}}", version)
 
-    out_path = os.path.join(project_dir, "installer_output.iss")
+    out_path = os.path.join(scripts_dir, "installer_output.iss")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(content)
     return out_path
@@ -103,10 +102,9 @@ def build():
     print(f"Building NetSwitch v{version} ...")
     result = subprocess.run(cmd, cwd=project_dir)
 
-    # 清理临时文件
-    for f in [vi_path]:
-        if os.path.exists(f):
-            os.remove(f)
+    # 清理临时文件（保留 iss 安装脚本供用户使用）
+    if os.path.exists(vi_path):
+        os.remove(vi_path)
 
     if result.returncode == 0:
         print(f"\nBuild succeeded!")

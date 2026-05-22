@@ -23,7 +23,6 @@ SetupIconFile=..\assets\icon.ico
 
 [Files]
 Source: "..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加选项:"
@@ -41,4 +40,4 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 NetSwitch"; \
-    Flags: nowait postkipifsilent skipifsilent unchecked
+    Flags: nowait skipifsilent unchecked

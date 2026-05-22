@@ -74,7 +74,7 @@ class TrayIcon(QSystemTrayIcon):
         self._update_tooltip()
 
     def _build_menu(self):
-        self.menu = QMenu()
+        self.menu = QMenu(self)
         self.setContextMenu(self.menu)
 
     def update_profiles(self, profiles, active_profile_id):
@@ -104,7 +104,7 @@ class TrayIcon(QSystemTrayIcon):
         self.menu.clear()
 
         for profile in self.profiles:
-            action = QAction(profile["name"], self)
+            action = QAction(profile["name"], self.menu)
             action.setData(profile["id"])
             if profile["id"] == self.active_profile_id:
                 action.setCheckable(True)
@@ -116,11 +116,11 @@ class TrayIcon(QSystemTrayIcon):
 
         self.menu.addSeparator()
 
-        open_action = QAction("打开主界面", self)
+        open_action = QAction("打开主界面", self.menu)
         open_action.triggered.connect(self.open_main_window.emit)
         self.menu.addAction(open_action)
 
-        startup_action = QAction("开机自启", self)
+        startup_action = QAction("开机自启", self.menu)
         startup_action.setCheckable(True)
         startup_action.setChecked(self._startup_enabled)
         startup_action.triggered.connect(
@@ -128,13 +128,13 @@ class TrayIcon(QSystemTrayIcon):
         )
         self.menu.addAction(startup_action)
 
-        settings_action = QAction("设置", self)
+        settings_action = QAction("设置", self.menu)
         settings_action.triggered.connect(self.open_settings.emit)
         self.menu.addAction(settings_action)
 
         self.menu.addSeparator()
 
-        quit_action = QAction("退出", self)
+        quit_action = QAction("退出", self.menu)
         quit_action.triggered.connect(self.quit_app.emit)
         self.menu.addAction(quit_action)
 

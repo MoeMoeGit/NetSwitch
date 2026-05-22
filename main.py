@@ -28,6 +28,7 @@ import profile_manager
 import network_controller
 from tray import TrayIcon
 from main_window import MainWindow
+from settings_dialog import SettingsDialog
 
 
 APP_NAME = "NetSwitch"
@@ -154,13 +155,17 @@ class NetSwitchApp:
             gateway = network_controller.get_gateway(adapter_ip)
             if gateway:
                 if network_controller.ping(gateway):
-                    self.tray.update_status("normal")
+                    status = "normal"
                 else:
-                    self.tray.update_status("warning")
+                    status = "warning"
             else:
-                self.tray.update_status("normal")
+                status = "warning"
         else:
-            self.tray.update_status("warning")
+            status = "warning"
+
+        self.tray.update_status(status)
+        if self.main_window:
+            self.main_window.set_network_status(status)
 
     def _restore_last_profile(self):
         active = profile_manager.get_active_profile(self.config)
@@ -183,14 +188,22 @@ class NetSwitchApp:
     def _on_tray_apply_finished(self, profile_id, status, error):
         if status == network_controller.FAILED:
             self.tray.update_status("error")
+            if error:
+                self.tray.setToolTip(f"NetSwitch - 切换失败：{error}")
+            if self.main_window:
+                self.main_window.set_network_status("error")
         else:
             profile_manager.set_active_profile(self.config, profile_id)
             profile_manager.update_last_used(self.config, profile_id)
             self._update_tray()
             if status == network_controller.GATEWAY_UNREACHABLE:
                 self.tray.update_status("warning")
+                if self.main_window:
+                    self.main_window.set_network_status("warning")
             else:
                 self.tray.update_status("normal")
+                if self.main_window:
+                    self.main_window.set_network_status("normal")
 
         self._tray_worker = None
 
@@ -211,6 +224,7 @@ class NetSwitchApp:
 
     def _on_profile_saved(self):
         self._update_tray()
+        self._check_network_status()
 
     def _on_window_closed(self):
         self.main_window = None
@@ -260,7 +274,6 @@ class NetSwitchApp:
 
     def _on_open_settings(self):
         """打开设置弹窗"""
-        from settings_dialog import SettingsDialog
         dlg = SettingsDialog(self.config, parent=None)
         dlg.startup_toggled.connect(self._on_toggle_startup)
         if dlg.exec():

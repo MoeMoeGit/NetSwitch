@@ -47,6 +47,16 @@ class _ApplyWorker(QThread):
         self.finished.emit(status, error or "")
 
 
+# ── 后台线程：删除激活方案前切换回 DHCP ──
+class _DeleteWorker(QThread):
+    finished = pyqtSignal(str, str)  # status, message
+
+    def run(self):
+        default_profile = profile_manager.get_default_profile()
+        status, error = network_controller.apply_profile(default_profile)
+        self.finished.emit(status, error or "")
+
+
 # ── 卡片组件 ──
 class ProfileCard(QWidget):
     """单个配置卡片"""
@@ -197,6 +207,8 @@ class ProfileCard(QWidget):
                 sub = ip
             elif last:
                 sub = self._format_time_ago(last)
+            elif self.profile.get("ip_mode") == "dhcp":
+                sub = "自动获取 IP"
             else:
                 sub = ""
         painter.drawText(content_left, 36, w - content_left - 80, 18,
@@ -291,6 +303,8 @@ class MainWindow(QWidget):
         self._drag_pos = None
         self._selected_id = None
         self._apply_worker = None
+        self._delete_worker = None
+        self._pending_delete_id = None
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -524,15 +538,48 @@ class MainWindow(QWidget):
             f"确认删除「{profile['name']}」？此操作不可撤销。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            success, msg = profile_manager.delete_profile(self.config, profile_id)
-            if not success:
-                QMessageBox.warning(self, "无法删除", msg)
-                return
-            if self._selected_id == profile_id:
-                self._selected_id = None
-            self._load_cards()
-            self.profile_saved.emit()
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        is_active = self.config.get("active_profile_id") == profile_id
+        if is_active and profile_id != "default":
+            # 删除激活方案需先切回 DHCP，使用后台线程避免阻塞 UI
+            self._pending_delete_id = profile_id
+            self.btn_delete.setEnabled(False)
+            self.btn_activate.setEnabled(False)
+            self.btn_delete.setText("删除中…")
+
+            self._delete_worker = _DeleteWorker()
+            self._delete_worker.finished.connect(self._on_delete_dhcp_finished)
+            self._delete_worker.start()
+        else:
+            self._do_delete_profile(profile_id)
+
+    def _on_delete_dhcp_finished(self, status, message):
+        self.btn_delete.setText("删除")
+        profile_id = self._pending_delete_id
+        self._pending_delete_id = None
+        self._delete_worker = None
+
+        if status == network_controller.FAILED:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "无法删除", f"切换回 DHCP 失败：{message}\n方案未删除。")
+            self._update_buttons()
+            return
+
+        self._do_delete_profile(profile_id)
+
+    def _do_delete_profile(self, profile_id):
+        config = self.config
+        config["profiles"] = [p for p in config["profiles"] if p["id"] != profile_id]
+        if config.get("active_profile_id") == profile_id:
+            config["active_profile_id"] = "default"
+        profile_manager.save_config(config)
+
+        if self._selected_id == profile_id:
+            self._selected_id = None
+        self._load_cards()
+        self.profile_saved.emit()
 
     def _on_activate(self):
         if not self._selected_id:
@@ -595,15 +642,26 @@ class MainWindow(QWidget):
                 self._status_label.setText(
                     f"当前 —  {ip}   网关 {gw or '—'}"
                 )
-                self._status_dot.setStyleSheet(f"color: {COLOR_GREEN}; font-size: 8px;")
             else:
                 self._status_label.setText("当前 —  未检测到网络")
                 self._status_dot.setStyleSheet(f"color: #F44336; font-size: 8px;")
         except Exception:
             self._status_label.setText("当前 —  检测失败")
 
+    def set_network_status(self, status):
+        """由主程序调用，同步网络状态到状态栏 dot 颜色"""
+        color_map = {
+            "normal": COLOR_GREEN,
+            "warning": "#D97706",
+            "error": "#F44336",
+            "switching": COLOR_GREEN,
+        }
+        color = color_map.get(status, COLOR_GREEN)
+        self._status_dot.setStyleSheet(f"color: {color}; font-size: 8px;")
+
     def _on_close(self):
         self._save_position()
+        self._status_timer.stop()
         self.hide()
         self.window_closed.emit()
 
@@ -613,6 +671,7 @@ class MainWindow(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._status_timer.start(15000)
         self._load_cards()
         self._refresh_status_bar()
 
