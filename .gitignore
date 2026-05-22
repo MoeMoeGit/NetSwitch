@@ -41,3 +41,9 @@ installer_output.iss
 
 # Logs
 *.log
+
+# Claude Code
+.claude/
+
+# 内部文档（不随源码分发）
+project-log/
