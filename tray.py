@@ -74,7 +74,7 @@ class TrayIcon(QSystemTrayIcon):
         self._update_tooltip()
 
     def _build_menu(self):
-        self.menu = QMenu(self)
+        self.menu = QMenu()
         self.setContextMenu(self.menu)
 
     def update_profiles(self, profiles, active_profile_id):

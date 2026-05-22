@@ -29,6 +29,12 @@ jobs:
       - name: Build exe
         run: uv run python scripts/build.py
 
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build installer
+        run: iscc scripts/installer_output.iss
+
       - name: Get version from tag
         id: version
         shell: bash
@@ -39,4 +45,6 @@ jobs:
         with:
           name: NetSwitch v${{ steps.version.outputs.VERSION }}
           generate_release_notes: true
-          files: dist/NetSwitch.exe
+          files: |
+            dist/NetSwitch.exe
+            installer_output/NetSwitch-Setup-${{ steps.version.outputs.VERSION }}.exe
