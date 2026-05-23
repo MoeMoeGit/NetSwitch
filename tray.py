@@ -91,7 +91,12 @@ class TrayIcon(QSystemTrayIcon):
             if p["id"] == self.active_profile_id:
                 active_name = p["name"]
                 break
-        status_map = {"normal": "正常", "warning": "网关不通", "error": "切换失败", "switching": "切换中…"}
+        status_map = {
+            "normal": "正常",
+            "warning": "网关异常",
+            "error": "切换失败",
+            "switching": "切换中…",
+        }
         status_text = status_map.get(self.status, "")
         tip = f"NetSwitch - {active_name}"
         if status_text:

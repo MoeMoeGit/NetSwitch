@@ -21,8 +21,8 @@ __version__ = _read_version()
 import ctypes
 import ctypes.wintypes
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer, QThread, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import QTimer, QThread, pyqtSignal, QSignalBlocker
 
 import profile_manager
 import network_controller
@@ -44,7 +44,6 @@ def _try_bring_existing_window():
     EnumWindows = user32.EnumWindows
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
     GetWindowTextW = user32.GetWindowTextW
-    IsWindowVisible = user32.IsWindowVisible
     SetForegroundWindow = user32.SetForegroundWindow
     ShowWindow = user32.ShowWindow
 
@@ -55,13 +54,12 @@ def _try_bring_existing_window():
     GetWindowTextLengthW = user32.GetWindowTextLengthW
 
     def callback(hwnd, _lparam):
-        if IsWindowVisible(hwnd):
-            length = GetWindowTextLengthW(hwnd)
-            if length > 0:
-                buf = ctypes.create_unicode_buffer(length + 1)
-                GetWindowTextW(hwnd, buf, length + 1)
-                if target_title in buf.value:
-                    found.append(hwnd)
+        length = GetWindowTextLengthW(hwnd)
+        if length > 0:
+            buf = ctypes.create_unicode_buffer(length + 1)
+            GetWindowTextW(hwnd, buf, length + 1)
+            if target_title in buf.value:
+                found.append(hwnd)
         return True
 
     EnumWindows(EnumWindowsProc(callback), 0)
@@ -173,12 +171,15 @@ class NetSwitchApp:
 
         # 主界面（延迟创建）
         self.main_window = None
+        self._settings_dialog = None
         self._last_network_snapshot = {
             "status": "warning",
             "ip": None,
             "gateway": None,
         }
         self._status_worker = None
+        self._tray_worker = None
+        self._is_switching = False
 
         # 更新托盘（含开机自启状态）
         self._update_tray()
@@ -226,17 +227,28 @@ class NetSwitchApp:
                 profile_manager.update_last_used(self.config, active["id"])
 
     def _on_tray_profile_selected(self, profile_id):
+        if (
+            self._is_switching
+            or (self._tray_worker and self._tray_worker.isRunning())
+            or (self.main_window and self.main_window.is_applying())
+            or network_controller._APPLY_LOCK.locked()
+        ):
+            return
         profile = profile_manager.get_profile_by_id(self.config, profile_id)
         if not profile:
             return
 
         self.tray.update_status("switching")
+        self._is_switching = True
 
         self._tray_worker = _TrayApplyWorker(profile)
         self._tray_worker.finished.connect(self._on_tray_apply_finished)
         self._tray_worker.start()
 
     def _on_tray_apply_finished(self, profile_id, status, error):
+        self._is_switching = False
+        self._tray_worker = None
+
         if status == network_controller.FAILED:
             self.tray.update_status("error")
             if error:
@@ -256,8 +268,6 @@ class NetSwitchApp:
                 if self.main_window:
                     self.main_window.set_network_status("normal")
             self._check_network_status()
-
-        self._tray_worker = None
 
     def show_main_window(self):
         if not self.main_window:
@@ -296,16 +306,21 @@ class NetSwitchApp:
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER, REG_PATH, 0, winreg.KEY_SET_VALUE,
             )
-            if enabled:
-                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, self._get_exe_path())
-            else:
-                try:
-                    winreg.DeleteValue(key, APP_NAME)
-                except FileNotFoundError:
-                    pass
-            winreg.CloseKey(key)
-        except Exception:
-            pass
+            try:
+                if enabled:
+                    winreg.SetValueEx(
+                        key, APP_NAME, 0, winreg.REG_SZ, f'"{self._get_exe_path()}"'
+                    )
+                else:
+                    try:
+                        winreg.DeleteValue(key, APP_NAME)
+                    except FileNotFoundError:
+                        pass
+            finally:
+                winreg.CloseKey(key)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
 
     def _is_startup_enabled(self):
         """检查注册表中是否已设置开机自启"""
@@ -322,16 +337,33 @@ class NetSwitchApp:
 
     def _on_toggle_startup(self, enabled):
         """托盘菜单切换开机自启"""
-        self._set_start_with_windows(enabled)
-        profile_manager.set_start_with_windows(self.config, enabled)
-        self.tray.update_startup_state(enabled)
+        success, message = self._set_start_with_windows(enabled)
+        if success:
+            profile_manager.set_start_with_windows(self.config, enabled)
+            self.tray.update_startup_state(enabled)
+            return
+
+        current = profile_manager.get_start_with_windows(self.config)
+        self.tray.update_startup_state(current)
+        if self._settings_dialog and hasattr(self._settings_dialog, "chk_startup"):
+            blocker = QSignalBlocker(self._settings_dialog.chk_startup)
+            self._settings_dialog.chk_startup.setChecked(current)
+            del blocker
+        QMessageBox.warning(
+            None,
+            APP_NAME,
+            f"开机自启设置失败：{message}",
+        )
 
     def _on_open_settings(self):
         """打开设置弹窗"""
         dlg = SettingsDialog(self.config, parent=None)
+        self._settings_dialog = dlg
         dlg.startup_toggled.connect(self._on_toggle_startup)
-        if dlg.exec():
-            self.tray.update_startup_state(self._is_startup_enabled())
+        try:
+            dlg.exec()
+        finally:
+            self._settings_dialog = None
 
     def run(self):
         return self.app.exec()

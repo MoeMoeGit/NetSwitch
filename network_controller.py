@@ -6,12 +6,14 @@ import os
 import tempfile
 import logging
 import time
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _LOG_PATH = Path(os.environ.get("APPDATA", "")) / "NetSwitch" / "netswitch.log"
 _LOGGER = logging.getLogger("NetSwitch.network")
+_APPLY_LOCK = threading.Lock()
 
 
 def _setup_logger():
@@ -266,30 +268,34 @@ def ping(host, timeout=3):
 
 def apply_profile(profile):
     """应用网络方案。返回 (status, message)，status 为 SUCCESS / GATEWAY_UNREACHABLE / FAILED"""
+    if not _APPLY_LOCK.acquire(blocking=False):
+        return FAILED, "正在切换中，请稍候"
+
     _log_debug(f"apply start: id={profile.get('id')} name={profile.get('name')} mode={profile.get('ip_mode')}")
-    adapter_ip = get_default_adapter_ip()
-    if not adapter_ip:
-        _log_error("apply failed: no default adapter ip")
-        return FAILED, "未检测到网络连接"
-
-    adapter_name = get_adapter_name_by_ip(adapter_ip)
-    if not adapter_name:
-        _log_error(f"apply failed: no adapter name for ip={adapter_ip}")
-        return FAILED, "未检测到网卡"
-
-    _log_debug(f"apply adapter: name={adapter_name} ip={adapter_ip}")
-    old_config = get_current_ip_config(adapter_ip)
-    _log_debug(f"apply old_config: {old_config}")
-
+    adapter_name = None
+    old_config = {}
     try:
+        adapter_ip = get_default_adapter_ip()
+        if not adapter_ip:
+            _log_error("apply failed: no default adapter ip")
+            return FAILED, "未检测到网络连接"
+
+        adapter_name = get_adapter_name_by_ip(adapter_ip)
+        if not adapter_name:
+            _log_error(f"apply failed: no adapter name for ip={adapter_ip}")
+            return FAILED, "未检测到网卡"
+
+        _log_debug(f"apply adapter: name={adapter_name} ip={adapter_ip}")
+        old_config = get_current_ip_config(adapter_ip)
+        _log_debug(f"apply old_config: {old_config}")
+
         if profile.get("ip_mode") == "dhcp":
             ok, msg = _run_netsh([
                 "interface", "ip", "set", "address",
                 f"name={adapter_name}", "source=dhcp",
             ])
             if not ok:
-                _rollback(adapter_name, old_config)
-                return FAILED, f"设置 DHCP 失败：{msg}"
+                return _fail_with_rollback(adapter_name, old_config, f"设置 DHCP 失败：{msg}")
         else:
             ip = profile.get("ip_address")
             mask = profile.get("subnet_mask")
@@ -302,8 +308,7 @@ def apply_profile(profile):
                 f"address={ip}", f"mask={mask}", f"gateway={gateway}",
             ])
             if not ok:
-                _rollback(adapter_name, old_config)
-                return FAILED, f"设置静态 IP 失败：{msg}"
+                return _fail_with_rollback(adapter_name, old_config, f"设置静态 IP 失败：{msg}")
 
         if profile.get("dns_mode") == "auto":
             ok, msg = _run_netsh([
@@ -311,8 +316,7 @@ def apply_profile(profile):
                 f"name={adapter_name}", "source=dhcp",
             ])
             if not ok:
-                _rollback(adapter_name, old_config)
-                return FAILED, f"设置 DNS 自动获取失败：{msg}"
+                return _fail_with_rollback(adapter_name, old_config, f"设置 DNS 自动获取失败：{msg}")
         else:
             primary = profile.get("dns_primary")
             secondary = profile.get("dns_secondary")
@@ -323,80 +327,104 @@ def apply_profile(profile):
                 f"name={adapter_name}", "source=static", f"address={primary}",
             ])
             if not ok:
-                _rollback(adapter_name, old_config)
-                return FAILED, f"设置首选 DNS 失败：{msg}"
+                return _fail_with_rollback(adapter_name, old_config, f"设置首选 DNS 失败：{msg}")
             if secondary:
                 ok, msg = _run_netsh([
                     "interface", "ip", "add", "dnsservers",
                     f"name={adapter_name}", f"address={secondary}", "index=2",
                 ])
                 if not ok:
-                    _rollback(adapter_name, old_config)
-                    return FAILED, f"设置备用 DNS 失败：{msg}"
+                    return _fail_with_rollback(adapter_name, old_config, f"设置备用 DNS 失败：{msg}")
 
         _wait_for_profile_to_settle(profile)
 
-        if profile.get("ip_mode") == "dhcp":
-            gw = get_gateway()
-            if gw and not ping(gw):
-                return GATEWAY_UNREACHABLE, "网关不通"
-        else:
-            gw = profile.get("gateway")
-            if gw and not ping(gw):
-                return GATEWAY_UNREACHABLE, "网关不通"
+        current_ip = get_default_adapter_ip() or adapter_ip
+        gw = get_gateway(current_ip)
+        if not gw:
+            return GATEWAY_UNREACHABLE, "未检测到网关"
+        if not ping(gw):
+            return GATEWAY_UNREACHABLE, "网关不通"
 
         _log_debug(f"apply success: id={profile.get('id')} name={profile.get('name')}")
         return SUCCESS, None
 
     except Exception as e:
-        _rollback(adapter_name, old_config)
+        try:
+            if adapter_name:
+                _rollback(adapter_name, old_config)
+        except Exception:
+            pass
         _log_error(f"apply exception: {e}")
         return FAILED, str(e)
+    finally:
+        _APPLY_LOCK.release()
+
+
+def _fail_with_rollback(adapter_name, old_config, message):
+    rollback_ok, rollback_message = _rollback(adapter_name, old_config)
+    if rollback_ok:
+        return FAILED, message
+    return FAILED, f"{message}；回滚失败：{rollback_message}"
 
 
 def _rollback(adapter_name, old_config):
     """回滚到之前的配置（IP + DNS）"""
     _log_debug(f"rollback start: adapter={adapter_name} old_config={old_config}")
+    errors = []
     try:
         if old_config.get("dhcp"):
-            _run_netsh([
+            ok, msg = _run_netsh([
                 "interface", "ip", "set", "address",
                 f"name={adapter_name}", "source=dhcp",
             ])
-            _run_netsh([
+            if not ok:
+                errors.append(f"回滚 DHCP 地址失败：{msg}")
+            ok, msg = _run_netsh([
                 "interface", "ip", "set", "dnsservers",
                 f"name={adapter_name}", "source=dhcp",
             ])
+            if not ok:
+                errors.append(f"回滚 DHCP DNS 失败：{msg}")
         else:
             ip = old_config.get("ip")
             mask = old_config.get("mask")
             gateway = old_config.get("gateway")
             if ip and mask and gateway:
-                _run_netsh([
+                ok, msg = _run_netsh([
                     "interface", "ip", "set", "address",
                     f"name={adapter_name}", "source=static",
                     f"address={ip}", f"mask={mask}", f"gateway={gateway}",
                 ])
+                if not ok:
+                    errors.append(f"回滚静态地址失败：{msg}")
             dns = old_config.get("dns")
             if dns:
-                _run_netsh([
+                ok, msg = _run_netsh([
                     "interface", "ip", "set", "dnsservers",
                     f"name={adapter_name}", "source=static", f"address={dns}",
                 ])
+                if not ok:
+                    errors.append(f"回滚首选 DNS 失败：{msg}")
                 dns2 = old_config.get("dns_secondary")
                 if dns2:
-                    _run_netsh([
+                    ok, msg = _run_netsh([
                         "interface", "ip", "add", "dnsservers",
                         f"name={adapter_name}", f"address={dns2}", "index=2",
                     ])
+                    if not ok:
+                        errors.append(f"回滚备用 DNS 失败：{msg}")
             else:
-                _run_netsh([
+                ok, msg = _run_netsh([
                     "interface", "ip", "set", "dnsservers",
                     f"name={adapter_name}", "source=dhcp",
                 ])
+                if not ok:
+                    errors.append(f"回滚 DNS 自动获取失败：{msg}")
         _log_debug("rollback finished")
+        return (len(errors) == 0, "; ".join(errors))
     except Exception as e:
         _log_error(f"rollback exception: {e}")
+        return False, str(e)
 
 
 def _wait_for_profile_to_settle(profile, timeout=5):

@@ -52,7 +52,6 @@ class SettingsDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def _on_startup_toggled(self, checked):
-        profile_manager.set_start_with_windows(self.config, checked)
         self.startup_toggled.emit(checked)
 
     def _on_restore_toggled(self, checked):

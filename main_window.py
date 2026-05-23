@@ -305,11 +305,13 @@ class MainWindow(QWidget):
         self._apply_worker = None
         self._delete_worker = None
         self._pending_delete_id = None
+        self._apply_in_progress = False
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowMinimizeButtonHint
         )
+        self.setWindowTitle("NetSwitch")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setFixedWidth(340)
         self.setMinimumHeight(300)
@@ -582,6 +584,10 @@ class MainWindow(QWidget):
     def _on_activate(self):
         if not self._selected_id:
             return
+        if self._apply_worker and self._apply_worker.isRunning():
+            return
+        if network_controller._APPLY_LOCK.locked():
+            return
 
         profile = profile_manager.get_profile_by_id(self.config, self._selected_id)
         if not profile:
@@ -590,6 +596,7 @@ class MainWindow(QWidget):
         # 按钮变为 loading 状态
         self.btn_activate.setEnabled(False)
         self.btn_activate.setText("切换中…")
+        self._apply_in_progress = True
 
         self._apply_worker = _ApplyWorker(profile)
         self._apply_worker.finished.connect(
@@ -598,6 +605,7 @@ class MainWindow(QWidget):
         self._apply_worker.start()
 
     def _on_apply_finished(self, profile, status, message):
+        self._apply_in_progress = False
         self.btn_activate.setText("激活")
         self._update_buttons()
 
@@ -615,6 +623,9 @@ class MainWindow(QWidget):
             self._load_cards()
 
         self._apply_worker = None
+
+    def is_applying(self):
+        return self._apply_in_progress
 
     def _open_edit_dialog(self, profile):
         dlg = EditDialog(profile, parent=self)

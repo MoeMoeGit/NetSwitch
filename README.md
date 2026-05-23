@@ -132,7 +132,7 @@ uv run python scripts/generate_icon.py
 uv run python scripts/build.py
 
 # 5. 构建安装包（需要 Inno Setup 6）
-iscc scripts/installer.iss
+iscc scripts/installer_output.iss
 ```
 
 构建完成后，exe 在 `dist/NetSwitch.exe`，安装包在 `installer_output/` 目录。

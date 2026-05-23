@@ -127,6 +127,7 @@ class EditDialog(QDialog):
 
         self.edit_dns_secondary = QLineEdit()
         self.edit_dns_secondary.setPlaceholderText("8.8.4.4（可选）")
+        self.edit_dns_secondary.textChanged.connect(self._validate)
         dns_fields_layout.addWidget(self._label("备用 DNS"))
         dns_fields_layout.addWidget(self.edit_dns_secondary)
 
@@ -233,6 +234,15 @@ class EditDialog(QDialog):
             else:
                 self.edit_dns_primary.setStyleSheet("")
 
+            if self.edit_dns_secondary.text().strip():
+                if not network_controller.validate_ipv4(self.edit_dns_secondary.text()):
+                    self.edit_dns_secondary.setStyleSheet("border: 1px solid red;")
+                    valid = False
+                else:
+                    self.edit_dns_secondary.setStyleSheet("")
+            else:
+                self.edit_dns_secondary.setStyleSheet("")
+
         self.btn_save.setEnabled(valid)
 
     def _load_profile(self, profile):
@@ -310,6 +320,9 @@ class EditDialog(QDialog):
         if self.radio_dns_manual.isChecked():
             if not network_controller.validate_ipv4(self.edit_dns_primary.text()):
                 QMessageBox.warning(self, "提示", "首选 DNS 格式不正确")
+                return False
+            if self.edit_dns_secondary.text().strip() and not network_controller.validate_ipv4(self.edit_dns_secondary.text()):
+                QMessageBox.warning(self, "提示", "备用 DNS 格式不正确")
                 return False
 
         return True

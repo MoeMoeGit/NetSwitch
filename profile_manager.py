@@ -3,6 +3,7 @@
 import json
 import os
 import uuid
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -53,13 +54,20 @@ def load_config():
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
     except (json.JSONDecodeError, KeyError):
+        _backup_invalid_config()
         config = get_default_config()
         save_config(config)
         return config
 
-    # 确保有默认方案
-    if not any(p["id"] == "default" for p in config.get("profiles", [])):
-        config["profiles"].insert(0, get_default_profile())
+    if not isinstance(config, dict):
+        _backup_invalid_config()
+        config = get_default_config()
+        save_config(config)
+        return config
+
+    changed = _normalize_config(config)
+    if changed:
+        save_config(config)
 
     return config
 
@@ -124,7 +132,7 @@ def get_profiles(config):
 def get_profile_by_id(config, profile_id):
     """根据 ID 获取方案"""
     for profile in config.get("profiles", []):
-        if profile["id"] == profile_id:
+        if profile.get("id") == profile_id:
             return profile
     return None
 
@@ -167,6 +175,7 @@ def create_profile(config, name, ip_mode, ip_address=None,
         if dns_secondary:
             profile["dns_secondary"] = dns_secondary
 
+    _normalize_profile(profile)
     config["profiles"].append(profile)
     save_config(config)
     return profile
@@ -182,6 +191,8 @@ def update_profile(config, profile_id, **kwargs):
         if key in ("name", "ip_mode", "ip_address", "subnet_mask",
                    "gateway", "dns_mode", "dns_primary", "dns_secondary", "remark"):
             profile[key] = value
+
+    _normalize_profile(profile)
 
     save_config(config)
     return profile
@@ -201,7 +212,7 @@ def delete_profile(config, profile_id):
         if status == network_controller.FAILED:
             return False, "当前方案激活中，切换回默认失败，无法删除"
 
-    config["profiles"] = [p for p in config["profiles"] if p["id"] != profile_id]
+    config["profiles"] = [p for p in config["profiles"] if p.get("id") != profile_id]
 
     if config.get("active_profile_id") == profile_id:
         config["active_profile_id"] = "default"
@@ -250,3 +261,68 @@ def save_window_position(config, x, y):
 def get_window_position(config):
     """获取保存的主窗口位置，返回 (x, y) 或 (None, None)"""
     return config.get("window_x"), config.get("window_y")
+
+
+def _backup_invalid_config():
+    """保留损坏配置的备份，避免直接覆盖丢失。"""
+    if not CONFIG_FILE.exists():
+        return
+
+    backup_path = CONFIG_FILE.with_name(
+        f"profiles.invalid.{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+    )
+    try:
+        shutil.copy2(CONFIG_FILE, backup_path)
+    except Exception:
+        pass
+
+
+def _normalize_config(config):
+    """补齐配置结构并清理无法使用的 profile。返回是否发生变更。"""
+    changed = False
+
+    if not isinstance(config, dict):
+        return False
+
+    if not isinstance(config.get("profiles"), list):
+        config["profiles"] = []
+        changed = True
+
+    valid_profiles = []
+    for profile in config["profiles"]:
+        if not isinstance(profile, dict) or not profile.get("id") or not profile.get("name"):
+            changed = True
+            continue
+        changed = _normalize_profile(profile) or changed
+        valid_profiles.append(profile)
+
+    config["profiles"] = valid_profiles
+
+    if not any(p.get("id") == "default" for p in config["profiles"]):
+        config["profiles"].insert(0, get_default_profile())
+        changed = True
+
+    if not get_profile_by_id(config, config.get("active_profile_id", "default")):
+        config["active_profile_id"] = "default"
+        changed = True
+
+    return changed
+
+
+def _normalize_profile(profile):
+    """清理与当前模式不匹配的旧字段。返回是否发生变更。"""
+    changed = False
+
+    if profile.get("ip_mode") != "static":
+        for key in ("ip_address", "subnet_mask", "gateway"):
+            if key in profile:
+                profile.pop(key, None)
+                changed = True
+
+    if profile.get("dns_mode") != "manual":
+        for key in ("dns_primary", "dns_secondary"):
+            if key in profile:
+                profile.pop(key, None)
+                changed = True
+
+    return changed
