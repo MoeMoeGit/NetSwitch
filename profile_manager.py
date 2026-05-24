@@ -4,6 +4,7 @@ import json
 import os
 import uuid
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -120,8 +121,27 @@ def _detect_and_save_current_config(config):
 def save_config(config):
     """保存配置文件"""
     ensure_config_dir()
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+            dir=APP_DIR,
+            prefix="profiles.",
+            suffix=".tmp",
+        ) as f:
+            tmp_path = Path(f.name)
+            json.dump(config, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, CONFIG_FILE)
+    finally:
+        if tmp_path and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
 
 
 def get_profiles(config):

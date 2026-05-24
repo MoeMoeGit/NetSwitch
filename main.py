@@ -2,6 +2,10 @@
 
 import sys
 import os
+import traceback
+import subprocess
+import tempfile
+from pathlib import Path
 
 
 def _read_version():
@@ -22,10 +26,12 @@ import ctypes
 import ctypes.wintypes
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QTimer, QThread, pyqtSignal, QSignalBlocker
+from PyQt6.QtCore import QTimer, QThread, pyqtSignal, QSignalBlocker, QUrl
+from PyQt6.QtGui import QDesktopServices
 
 import profile_manager
 import network_controller
+import update_manager
 from tray import TrayIcon
 from main_window import MainWindow
 from settings_dialog import SettingsDialog
@@ -34,6 +40,9 @@ from settings_dialog import SettingsDialog
 APP_NAME = "NetSwitch"
 MUTEX_NAME = "Global_NetSwitch_SingleInstance"
 REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
+HOMEPAGE_URL = "https://github.com/MoeMoeGit/NetSwitch"
+ISSUES_URL = "https://github.com/MoeMoeGit/NetSwitch/issues"
+RELEASES_URL = "https://github.com/MoeMoeGit/NetSwitch/releases/latest"
 
 
 # ── 单实例检测 ──
@@ -70,6 +79,19 @@ def _try_bring_existing_window():
         SetForegroundWindow(hwnd)
         return True
     return False
+
+
+def _log_uncaught_exception(exc_type, exc, tb):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc, tb)
+        return
+    try:
+        network_controller._log_error(
+            "uncaught exception:\n" + "".join(traceback.format_exception(exc_type, exc, tb)).rstrip()
+        )
+    except Exception:
+        pass
+    sys.__excepthook__(exc_type, exc, tb)
 
 
 def acquire_mutex():
@@ -148,6 +170,48 @@ class _StatusCheckWorker(QThread):
         self.finished.emit(status, adapter_ip, gateway)
 
 
+class _UpdateCheckWorker(QThread):
+    finished = pyqtSignal(object, str)  # release dict or None, error
+
+    def __init__(self, current_version):
+        super().__init__()
+        self.current_version = current_version
+
+    def run(self):
+        try:
+            release = update_manager.get_latest_release(self.current_version)
+            self.finished.emit(release, "")
+        except Exception as e:
+            self.finished.emit(None, str(e))
+
+
+class _UpdateDownloadWorker(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(str, str)  # installer_path, error
+
+    def __init__(self, release):
+        super().__init__()
+        self.release = release
+
+    def run(self):
+        try:
+            asset_name = self.release.get("asset_name") or "NetSwitch-Setup.exe"
+            destination = Path(tempfile.gettempdir()) / asset_name
+
+            def on_progress(downloaded, total):
+                if total:
+                    self.progress.emit(int(downloaded * 100 / total))
+
+            path = update_manager.download_file(
+                self.release.get("asset_url", ""),
+                destination,
+                progress_callback=on_progress,
+            )
+            self.finished.emit(path, "")
+        except Exception as e:
+            self.finished.emit("", str(e))
+
+
 # ── 主应用 ──
 
 class NetSwitchApp:
@@ -166,7 +230,10 @@ class NetSwitchApp:
         self.tray.toggle_startup.connect(self._on_toggle_startup)
         self.tray.open_settings.connect(self._on_open_settings)
         self.tray.refresh_status_requested.connect(self._check_network_status)
-        self.tray.update_startup_state(self._is_startup_enabled())
+        startup_enabled = self._is_startup_enabled()
+        if profile_manager.get_start_with_windows(self.config) != startup_enabled:
+            profile_manager.set_start_with_windows(self.config, startup_enabled)
+        self.tray.update_startup_state(startup_enabled)
         self.tray.show()
 
         # 主界面（延迟创建）
@@ -180,6 +247,9 @@ class NetSwitchApp:
         self._status_worker = None
         self._tray_worker = None
         self._is_switching = False
+        self._update_check_worker = None
+        self._update_download_worker = None
+        self._pending_update_installer = None
 
         # 更新托盘（含开机自启状态）
         self._update_tray()
@@ -249,25 +319,35 @@ class NetSwitchApp:
         self._is_switching = False
         self._tray_worker = None
 
-        if status == network_controller.FAILED:
-            self.tray.update_status("error")
-            if error:
-                self.tray.setToolTip(f"NetSwitch - 切换失败：{error}")
-            if self.main_window:
-                self.main_window.set_network_status("error")
-        else:
-            profile_manager.set_active_profile(self.config, profile_id)
-            profile_manager.update_last_used(self.config, profile_id)
-            self._update_tray()
-            if status == network_controller.GATEWAY_UNREACHABLE:
-                self.tray.update_status("warning")
+        try:
+            if status == network_controller.FAILED:
+                self.tray.update_status("error")
+                if error:
+                    self.tray.setToolTip(f"NetSwitch - 切换失败：{error}")
                 if self.main_window:
-                    self.main_window.set_network_status("warning")
+                    self.main_window.set_network_status("error")
             else:
-                self.tray.update_status("normal")
-                if self.main_window:
-                    self.main_window.set_network_status("normal")
-            self._check_network_status()
+                profile_manager.set_active_profile(self.config, profile_id)
+                profile_manager.update_last_used(self.config, profile_id)
+                self._update_tray()
+                if status == network_controller.GATEWAY_UNREACHABLE:
+                    self.tray.update_status("warning")
+                    if self.main_window:
+                        self.main_window.set_network_status("warning")
+                else:
+                    self.tray.update_status("normal")
+                    if self.main_window:
+                        self.main_window.set_network_status("normal")
+                self._check_network_status()
+        except Exception as e:
+            try:
+                network_controller._log_error(f"tray apply finish exception: {e}")
+                network_controller._log_error(
+                    "".join(traceback.format_exception(type(e), e, e.__traceback__)).rstrip()
+                )
+            except Exception:
+                pass
+            QMessageBox.critical(None, APP_NAME, f"切换完成后处理失败：{e}")
 
     def show_main_window(self):
         if not self.main_window:
@@ -291,7 +371,7 @@ class NetSwitchApp:
         self._check_network_status()
 
     def _on_window_closed(self):
-        self.main_window = None
+        pass
 
     @staticmethod
     def _get_exe_path():
@@ -357,23 +437,167 @@ class NetSwitchApp:
 
     def _on_open_settings(self):
         """打开设置弹窗"""
-        dlg = SettingsDialog(self.config, parent=None)
+        dlg = SettingsDialog(self.config, version=__version__, parent=None)
         self._settings_dialog = dlg
         dlg.startup_toggled.connect(self._on_toggle_startup)
+        dlg.check_update_requested.connect(self._on_check_update_requested)
+        dlg.open_homepage_requested.connect(lambda: self._open_url(HOMEPAGE_URL))
+        dlg.open_issues_requested.connect(lambda: self._open_url(ISSUES_URL))
         try:
             dlg.exec()
         finally:
             self._settings_dialog = None
 
+    def _open_url(self, url):
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _set_update_button_state(self, enabled, text):
+        if self._settings_dialog and hasattr(self._settings_dialog, "btn_check_update"):
+            self._settings_dialog.btn_check_update.setEnabled(enabled)
+            self._settings_dialog.btn_check_update.setText(text)
+
+    def _is_installed_version(self):
+        exe_path = Path(self._get_exe_path()).resolve()
+        return (
+            exe_path.with_name("unins000.exe").exists()
+            or exe_path.with_name("unins000.dat").exists()
+        )
+
+    def _on_check_update_requested(self):
+        if self._is_network_switching():
+            QMessageBox.information(None, APP_NAME, "正在切换网络，请完成后再检查更新。")
+            return
+        if not self._is_installed_version():
+            QMessageBox.information(
+                None,
+                APP_NAME,
+                "当前是便携版，内置自动更新仅支持已安装版本。请打开发布页手动下载新的便携版。",
+            )
+            self._open_url(RELEASES_URL)
+            return
+        if self._update_check_worker and self._update_check_worker.isRunning():
+            return
+
+        self._set_update_button_state(False, "正在检查…")
+        self._update_check_worker = _UpdateCheckWorker(__version__)
+        self._update_check_worker.finished.connect(self._on_update_check_finished)
+        self._update_check_worker.start()
+
+    def _on_update_check_finished(self, release, error):
+        self._update_check_worker = None
+        self._set_update_button_state(True, "检查更新")
+
+        if error:
+            network_controller._log_error(f"update check failed: {error}")
+            QMessageBox.warning(None, APP_NAME, f"检查更新失败：{error}")
+            return
+
+        if not release:
+            QMessageBox.information(None, APP_NAME, f"当前已是最新版本（{__version__}）。")
+            return
+
+        box = QMessageBox(None)
+        box.setWindowTitle(APP_NAME)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(f"发现新版本 {release['version']}")
+        box.setInformativeText(
+            f"当前版本：{__version__}\n"
+            f"安装包：{release.get('asset_name', '')}\n\n"
+            "可以直接下载安装包，也可以打开 GitHub Release 页面手动查看。"
+        )
+        if release.get("body"):
+            box.setDetailedText(release["body"])
+        download_btn = box.addButton("下载并安装", QMessageBox.ButtonRole.AcceptRole)
+        open_btn = box.addButton("打开发布页", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == download_btn:
+            self._download_update(release)
+        elif clicked == open_btn:
+            self._open_url(release.get("html_url") or HOMEPAGE_URL)
+
+    def _download_update(self, release):
+        if self._is_network_switching():
+            QMessageBox.information(None, APP_NAME, "正在切换网络，请完成后再安装更新。")
+            return
+        if not self._is_installed_version():
+            QMessageBox.information(
+                None,
+                APP_NAME,
+                "当前是便携版，不能在运行中自动安装更新。请打开发布页手动下载新的便携版。",
+            )
+            self._open_url(RELEASES_URL)
+            return
+        if self._update_download_worker and self._update_download_worker.isRunning():
+            return
+        if not release.get("asset_url"):
+            QMessageBox.warning(None, APP_NAME, "更新安装包下载地址无效。")
+            return
+
+        self._set_update_button_state(False, "正在下载…")
+        self._update_download_worker = _UpdateDownloadWorker(release)
+        self._update_download_worker.progress.connect(self._on_update_download_progress)
+        self._update_download_worker.finished.connect(self._on_update_download_finished)
+        self._update_download_worker.start()
+
+    def _on_update_download_progress(self, percent):
+        self._set_update_button_state(False, f"正在下载 {percent}%")
+
+    def _on_update_download_finished(self, installer_path, error):
+        self._update_download_worker = None
+        self._set_update_button_state(True, "检查更新")
+
+        if error:
+            network_controller._log_error(f"update download failed: {error}")
+            QMessageBox.warning(None, APP_NAME, f"下载更新失败：{error}")
+            return
+
+        if self._is_network_switching():
+            QMessageBox.information(None, APP_NAME, "更新已下载。请等待网络切换完成后，再重新点击检查更新安装。")
+            return
+
+        reply = QMessageBox.question(
+            None,
+            APP_NAME,
+            "更新安装包已下载。是否现在退出 NetSwitch 并运行安装程序？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._pending_update_installer = installer_path
+            self.quit()
+
     def run(self):
         return self.app.exec()
 
+    def _is_network_switching(self):
+        return (
+            self._is_switching
+            or (self._tray_worker and self._tray_worker.isRunning())
+            or (self.main_window and self.main_window.is_applying())
+            or network_controller._APPLY_LOCK.locked()
+        )
+
     def quit(self):
+        installer = self._pending_update_installer
+        if installer:
+            try:
+                subprocess.Popen(
+                    [installer],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except Exception as e:
+                network_controller._log_error(f"launch installer failed: {e}")
+                QMessageBox.warning(None, APP_NAME, f"启动安装程序失败：{e}")
+                self._pending_update_installer = None
+                return
         self.tray.hide()
         self.app.quit()
 
 
 def main():
+    sys.excepthook = _log_uncaught_exception
     if not _is_running_as_admin():
         if _relaunch_as_admin():
             sys.exit(0)

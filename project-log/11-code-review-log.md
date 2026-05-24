@@ -418,3 +418,46 @@ A 评审（发现） → B 验证 + 修复确认项 + 评审（发现）
 
 - 静态编译通过。
 - 未执行真实 DHCP / 静态 IP 切换，原因是会修改当前机器网络配置。
+
+---
+
+## D — 全量复核与二次确认
+
+**评审人**：Codex  
+**日期**：2026-05-24  
+**范围**：按用户要求先阅读 `project-log/README.md`，再复核 project-log、README、核心代码、构建脚本和 release workflow。
+
+### 已确认问题
+
+| 问题 | 严重程度 | 状态 | 说明 |
+|------|----------|------|------|
+| D-01 单实例隐藏窗口唤起仍可能失效 | 高 | 已修复，待验证 | 主窗口隐藏后保留引用，不再主动清空 `main_window`；第二实例仍通过窗口枚举尝试唤起。 |
+| D-02 开机自启配置与注册表真实状态可能不同步 | 中 | 已修复 | 启动时以注册表为准，并同步回 `profiles.json`。 |
+| D-03 自定义子网掩码校验过宽 | 中 | 已修复 | 新增连续 1 的合法掩码校验。 |
+| D-04 配置保存不是原子写 | 中 | 已修复 | `profiles.json` 现在先写临时文件，再 `os.replace()` 原子替换。 |
+| D-05 Release tag 版本与 `VERSION` 不一致时发布失败 | 低 | 已修复 | 构建脚本在打包前校验 `VERSION` 与 Git tag 是否一致。 |
+| D-06 project-log 部分描述落后于代码 | 低 | 已修复 | 已同步更新 `01-function-design.md`、`03-api-design.md`、`05-current-status.md` 等文档。 |
+
+### 待确认问题
+
+| 问题 | 影响 | 验证需求 |
+|------|------|----------|
+| 多 IPv4 地址同网卡场景可能读错当前配置 | 默认路由网卡有多个 IPv4 时，正则取第一个地址不一定等于默认路由地址 | 需要 Windows 多 IP 网卡实机验证。 |
+| 无默认网关 / 隔离网段是否正式支持 | 当前默认路由识别模型对无网关场景天然不友好 | 需要产品决策确认是否支持。 |
+
+### 用户侧优化建议
+
+- 增加“导入当前配置为方案”入口，减少用户手工录入现场网络参数。
+- 为切换失败增加更显眼的通知或最近切换日志入口，避免错误只藏在 tooltip / 日志文件中。
+- 区分“上次由 NetSwitch 应用的方案”和“当前系统实际匹配的方案”，避免用户手工改 Windows 网络后仍看到旧方案激活。
+- 降低 DHCP 切换中间态的 `default adapter not found` 日志噪声。
+
+### 本轮验证结果
+
+- 静态编译通过。
+- 未执行真实 DHCP / 静态 IP 切换，原因是会修改当前机器网络配置。
+
+### D 验证方式
+
+- 运行 `PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py scripts/build.py scripts/generate_icon.py`。
+- 本轮评审未执行真实 DHCP / 静态 IP 切换，原因是会修改本机网络配置。

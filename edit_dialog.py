@@ -215,7 +215,7 @@ class EditDialog(QDialog):
                 self.edit_ip.setStyleSheet("")
 
             if self.combo_mask.currentIndex() == 3:
-                if not network_controller.validate_ipv4(self.edit_mask_custom.text()):
+                if not network_controller.validate_subnet_mask(self.edit_mask_custom.text()):
                     self.edit_mask_custom.setStyleSheet("border: 1px solid red;")
                     valid = False
                 else:
@@ -313,7 +313,7 @@ class EditDialog(QDialog):
                     return False
 
             if self.combo_mask.currentIndex() == 3:
-                if not network_controller.validate_ipv4(self.edit_mask_custom.text()):
+                if not network_controller.validate_subnet_mask(self.edit_mask_custom.text()):
                     QMessageBox.warning(self, "提示", "子网掩码格式不正确")
                     return False
 

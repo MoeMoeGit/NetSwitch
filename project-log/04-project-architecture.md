@@ -28,6 +28,11 @@ Qt 应用协调层 main.py
         ├─ route print / PowerShell 读取网络状态
         ├─ netsh 写入网络配置
         └─ ping 验证网关
+
+更新与发布
+  └─ update_manager.py
+        ├─ GitHub Release 最新版本查询
+        └─ 安装包下载
 ```
 
 ## 目录结构
@@ -41,6 +46,7 @@ NetSwitch/
 ├── settings_dialog.py      # 设置弹窗
 ├── profile_manager.py      # 配置文件和方案管理
 ├── network_controller.py   # 网络读取、写入、验证和回滚
+├── update_manager.py       # 更新检查和安装包下载
 ├── assets/                 # 图标、截图等资源
 ├── scripts/
 │   ├── generate_icon.py    # 构建期图标生成

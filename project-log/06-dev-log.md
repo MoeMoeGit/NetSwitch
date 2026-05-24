@@ -2,6 +2,97 @@
 
 ---
 
+## 2026-05-24（设置页增加检查更新与帮助反馈）
+
+**触发原因**：用户反馈软件更新流程太麻烦，希望把检查更新放进软件内，并在设置页增加作者信息、GitHub 主页和 Issue 入口。
+
+**修改内容**：
+1. `update_manager.py` — 新增 GitHub Release 更新检查与安装包下载模块，支持版本比较、最新 Release 解析和文件下载。
+2. `settings_dialog.py` — 将设置页拆成“常规 / 更新 / 帮助与反馈”三块，加入“检查更新”、作者姓名、邮箱、GitHub 主页和 Issue 反馈入口。
+3. `main.py` — 接入设置页更新信号；后台检查最新 Release；发现新版本后可直接下载并运行安装包；同时补充 GitHub 页面打开逻辑。
+4. `main.py` — 更新安装器启动失败时不退出当前程序；更新提示增加 Release 说明详情。
+5. `scripts/installer.iss` — 安装器启用关闭 / 重启应用支持，并将安装完成后启动 NetSwitch 改为默认勾选，便于软件内更新后直接回到新版本。
+6. `main.py`、`update_manager.py` — 更新检查 / 安装前避开网络切换进行中状态；下载先写 `.download` 临时文件，完整后再替换；只接受安装包资产，避免把便携版 exe 当安装器运行。
+7. `main.py` — 自动安装更新仅对已安装版本开放；便携版用户会被引导到发布页手动下载新包，避免错误覆盖。
+8. `main.py` — 便携版提示直接跳转 GitHub Releases 页面，减少用户寻找下载入口的步骤。
+
+**遇到的问题**：
+- 设置页原本只适合放两个开关，若直接塞入更新和反馈入口会显得拥挤。
+- 软件内更新和自启动同属设置，但交互性质不同，需要拆分成独立区块，避免按钮混杂。
+
+**解决方式**：
+- 用 `QGroupBox` 组织为三个区块：常规、更新、帮助与反馈。
+- 更新逻辑保持为手动触发，避免常驻后台打扰用户；支持下载后直接退出并启动安装程序。
+- Windows 上不直接覆盖运行中的 exe；采用下载安装包、退出当前进程、运行安装器、安装完成后启动新版的流程。
+- 更新与网络切换互斥，避免升级退出时打断正在执行的 `netsh` 写入。
+- 便携版与安装版的更新策略分离，避免把“运行中的便携 exe”误当作可就地升级对象。
+
+**验证方式**：
+- 运行 `PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py scripts/build.py scripts/generate_icon.py update_manager.py`。
+
+**验证结果**：
+- 静态编译通过。
+- 未执行真实网络切换，原因是会修改本机网络配置。
+
+**本地产物清理**：
+- 本轮未生成构建产物。
+
+## 2026-05-24（按钮可读性与闪退异常落盘）
+
+**触发原因**：Windows 台式机实机测试反馈主窗口底部按钮在白底上不可读，且点击自定义方案后应用看似成功但窗口直接退出，需要把真正的异常写入日志。
+
+**修改内容**：
+1. `main_window.py` — 为“新建”和“删除”按钮补充明确背景色、文字色和悬停态，确保在白底窗口中可读。
+2. `main_window.py` — 方案应用成功后的回写链路增加异常捕获；若 `set_active_profile()`、`update_last_used()`、`profile_applied.emit()` 或随后的 UI 刷新失败，会把 traceback 写入 `%AppData%\NetSwitch\netswitch.log` 并弹出错误提示。
+3. `main.py` — 增加全局 `sys.excepthook`，将未捕获异常写入日志，便于定位打包后的“直接退出”问题。
+
+**遇到的问题**：
+- 当前日志只能看到 `netsh ok` 和 `apply success`，无法直接定位后续 Python 层异常。
+- 按钮样式如果只依赖默认系统主题，在白底布局上容易失去可读性。
+
+**解决方式**：
+- 通过显式样式统一按钮外观。
+- 通过 `network_controller._log_error()` 输出 traceback，避免 windowed 程序吞掉异常信息。
+
+**验证方式**：
+- 运行 `PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py scripts/build.py scripts/generate_icon.py`。
+
+**验证结果**：
+- 静态编译通过。
+- 未执行真实网络切换，原因是会修改本机网络配置。
+
+**本地产物清理**：
+- 本轮未生成构建产物。
+
+## 2026-05-24（二次复核确认问题修复）
+
+**触发原因**：用户确认继续执行本轮复核后的修复，要求先记录，再修改代码。本轮重点补齐单实例隐藏窗口引用保留、自启状态同步、合法子网掩码校验、配置原子写和 release 版本一致性检查。
+
+**修改内容**：
+1. `main.py` — 启动时以注册表真实状态为准，同步回 `profiles.json`，避免托盘与设置弹窗显示不一致；窗口关闭到托盘后保留主窗口引用，不再主动清空。
+2. `edit_dialog.py`、`network_controller.py` — 子网掩码改为连续 1 的合法掩码校验，阻止 `1.2.3.4` 这类非法值保存。
+3. `profile_manager.py` — `profiles.json` 采用临时文件写入后 `os.replace()` 原子替换，降低损坏风险。
+4. `scripts/build.py` — 在打包前校验 `VERSION` 与 Git tag 版本一致，避免 Release 产物文件名和上传路径不匹配。
+5. `project-log/05-current-status.md`、`project-log/01-function-design.md`、`project-log/03-api-design.md`、`project-log/10-planning-log.md`、`project-log/11-code-review-log.md` — 同步更新本轮复核结果和旧文档内容。
+
+**遇到的问题**：
+- 需要区分“窗口隐藏后保留引用”和“窗口真的关闭销毁”两种生命周期语义，避免单实例唤起再次失效。
+- 版本一致性检查需要兼容本地开发运行和 GitHub Actions tag 发布两种场景。
+
+**解决方式**：
+- 主窗口关闭到托盘时只隐藏不销毁实例引用，由应用层统一管理生命周期。
+- 版本校验只在 tag 发布上下文启用，普通本地构建不受影响。
+
+**验证方式**：
+- 运行 `PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py scripts/build.py scripts/generate_icon.py`。
+
+**验证结果**：
+- 静态编译通过。
+- 未执行真实网络切换，原因是会修改本机网络配置。
+
+**本地产物清理**：
+- 本轮未生成构建产物。
+
 ## 2026-05-23（确认问题修复）
 
 **触发原因**：用户要求先复核已发现问题，再修复确认成立的问题。本轮修复网络切换可靠性、单实例唤起、自启反馈、配置数据一致性和 README 构建命令等问题。
@@ -14,7 +105,7 @@
 5. `profile_manager.py` — 方案读取和保存时清理与当前 IP / DNS 模式不匹配的旧字段；配置文件损坏时先备份为 `profiles.invalid.<timestamp>.json` 再重建默认配置。
 6. `tray.py` — warning 状态 tooltip 改为“网关异常”，覆盖网关不通和无网关两种情况。
 7. `README.md` — 安装包构建命令改为 `iscc scripts/installer_output.iss`。
-8. `VERSION`、`pyproject.toml`、`uv.lock` — 版本号推进到 `1.3.1`。
+8. `VERSION`、`pyproject.toml`、`uv.lock` — 版本号推进到 `1.4.0`。
 9. `project-log/05-current-status.md`、`project-log/10-planning-log.md` — 更新当前状态和本轮修复方案。
 
 **遇到的问题**：

@@ -2,7 +2,7 @@
 
 > 本项目不提供 HTTP API、RPC、WebSocket 或服务端接口。  
 > 本文件记录桌面应用调用的本机系统命令接口。  
-> **最后更新**：2026-05-22
+> **最后更新**：2026-05-24
 
 ## API 概览
 
@@ -27,21 +27,21 @@
 ### 设置手动 IP
 
 ```bash
-netsh interface ip set address "以太网" static 10.1.1.100 255.255.255.0 10.1.1.2
+netsh interface ip set address name=以太网 source=static address=10.1.1.100 mask=255.255.255.0 gateway=10.1.1.2
 ```
 
 ### 设置手动 DNS
 
 ```bash
-netsh interface ip set dns "以太网" static 10.1.1.2
-netsh interface ip add dns "以太网" 8.8.8.8 index=2
+netsh interface ip set dnsservers name=以太网 source=static address=10.1.1.2
+netsh interface ip add dnsservers name=以太网 address=8.8.8.8 index=2
 ```
 
 ### 切回 DHCP
 
 ```bash
-netsh interface ip set address "以太网" dhcp
-netsh interface ip set dns "以太网" dhcp
+netsh interface ip set address name=以太网 source=dhcp
+netsh interface ip set dnsservers name=以太网 source=dhcp
 ```
 
 ### 读取当前优先网卡
@@ -50,7 +50,7 @@ netsh interface ip set dns "以太网" dhcp
 route print 0.0.0.0
 ```
 
-当前实现解析输出中的默认路由，取接口 IP，再用 PowerShell 查询 `InterfaceAlias`。
+当前实现优先使用 PowerShell 路由对象按 metric 选择默认路由，再回退到 `route print` 文本解析。
 
 ## 错误处理约定
 
@@ -62,7 +62,7 @@ route print 0.0.0.0
 | `gateway_unreachable` | 配置已应用，但网关 ping 不通 |
 | `failed` | 应用失败 |
 
-当前实现需要改进：部分 `netsh` 失败没有触发回滚，DNS 命令失败也可能被忽略。详见 `11-code-review-log.md`。
+当前实现对 `netsh` 失败会返回详细错误并进入回滚；配置保存采用原子替换。详见 `11-code-review-log.md`。
 
 ## 变更记录
 

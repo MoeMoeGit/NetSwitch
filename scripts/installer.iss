@@ -18,6 +18,8 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+CloseApplications=yes
+RestartApplications=yes
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile=..\assets\icon.ico
 
@@ -40,4 +42,4 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 NetSwitch"; \
-    Flags: nowait skipifsilent unchecked
+    Flags: nowait postinstall skipifsilent

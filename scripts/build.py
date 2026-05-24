@@ -13,6 +13,18 @@ def get_version():
         return f.read().strip()
 
 
+def ensure_version_matches_tag(version):
+    """确保 VERSION 与当前 Git tag 一致。"""
+    tag = os.environ.get("GITHUB_REF_NAME", "")
+    if not tag.startswith("v"):
+        return
+    tag_version = tag[1:]
+    if version != tag_version:
+        raise SystemExit(
+            f"VERSION ({version}) does not match tag version ({tag_version})"
+        )
+
+
 def generate_version_info(version, project_dir):
     """生成 PyInstaller Windows 版本信息文件"""
     nums = version.split(".")
@@ -75,6 +87,7 @@ def generate_installer_iss(version, scripts_dir):
 
 def build():
     version = get_version()
+    ensure_version_matches_tag(version)
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
 

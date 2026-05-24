@@ -449,3 +449,19 @@ def validate_ipv4(ip):
     if not match:
         return False
     return all(0 <= int(match.group(i)) <= 255 for i in range(1, 5))
+
+
+def validate_subnet_mask(mask):
+    """验证子网掩码是否为连续 1 的合法掩码。"""
+    if not validate_ipv4(mask):
+        return False
+    parts = [int(part) for part in mask.split(".")]
+    value = 0
+    for part in parts:
+        value = (value << 8) | part
+
+    if value == 0:
+        return False
+
+    inverted = (~value) & 0xFFFFFFFF
+    return (inverted & (inverted + 1)) == 0

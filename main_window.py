@@ -1,6 +1,7 @@
 """主界面模块 - 自定义无边框窗口、卡片列表、状态栏、操作按钮"""
 
 from datetime import datetime
+import traceback
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -425,8 +426,9 @@ class MainWindow(QWidget):
         self.btn_new = QPushButton("新建")
         self.btn_new.setStyleSheet(
             f"QPushButton {{ border: 1px solid {COLOR_BORDER}; border-radius: 4px; "
-            f"padding: 6px 14px; font-size: 12px; background: transparent; }}"
-            "QPushButton:hover { background: #f5f5f5; }"
+            f"padding: 6px 14px; font-size: 12px; color: {COLOR_TEXT}; "
+            f"background: {COLOR_BG_SECONDARY}; }}"
+            "QPushButton:hover { background: #ededed; }"
         )
         self.btn_new.clicked.connect(self._on_new)
         bot_layout.addWidget(self.btn_new)
@@ -434,9 +436,10 @@ class MainWindow(QWidget):
         self.btn_delete = QPushButton("删除")
         self.btn_delete.setStyleSheet(
             f"QPushButton {{ border: 1px solid #e8d5d5; border-radius: 4px; "
-            f"padding: 6px 14px; font-size: 12px; color: {COLOR_RED_TEXT}; background: transparent; }}"
-            "QPushButton:hover { background: #fef2f2; }"
-            "QPushButton:disabled { color: #ccc; border-color: #eee; }"
+            f"padding: 6px 14px; font-size: 12px; color: {COLOR_RED_TEXT}; "
+            "background: #FFF5F5; }"
+            "QPushButton:hover { background: #FDE8E8; }"
+            "QPushButton:disabled { color: #B8B8B8; border-color: #EEE; background: #FAFAFA; }"
         )
         self.btn_delete.clicked.connect(self._on_delete_click)
         self.btn_delete.setEnabled(False)
@@ -605,24 +608,34 @@ class MainWindow(QWidget):
         self._apply_worker.start()
 
     def _on_apply_finished(self, profile, status, message):
-        self._apply_in_progress = False
-        self.btn_activate.setText("激活")
-        self._update_buttons()
+        try:
+            self._apply_in_progress = False
+            self.btn_activate.setText("激活")
+            self._update_buttons()
 
-        if status == network_controller.FAILED:
-            for i in range(self._card_layout.count()):
-                item = self._card_layout.itemAt(i)
-                card = item.widget()
-                if isinstance(card, ProfileCard) and card.profile_id == profile["id"]:
-                    card.show_result(False, message)
-                    break
-        else:
-            profile_manager.set_active_profile(self.config, profile["id"])
-            profile_manager.update_last_used(self.config, profile["id"])
-            self.profile_applied.emit(profile["id"])
-            self._load_cards()
-
-        self._apply_worker = None
+            if status == network_controller.FAILED:
+                for i in range(self._card_layout.count()):
+                    item = self._card_layout.itemAt(i)
+                    card = item.widget()
+                    if isinstance(card, ProfileCard) and card.profile_id == profile["id"]:
+                        card.show_result(False, message)
+                        break
+            else:
+                profile_manager.set_active_profile(self.config, profile["id"])
+                profile_manager.update_last_used(self.config, profile["id"])
+                self.profile_applied.emit(profile["id"])
+                self._load_cards()
+        except Exception as e:
+            try:
+                network_controller._log_error(f"apply finish exception: {e}")
+                import traceback
+                network_controller._log_error(traceback.format_exc().rstrip())
+            except Exception:
+                pass
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "NetSwitch", f"切换已完成但界面处理失败：{e}")
+        finally:
+            self._apply_worker = None
 
     def is_applying(self):
         return self._apply_in_progress
