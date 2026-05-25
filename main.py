@@ -206,6 +206,7 @@ class _UpdateDownloadWorker(QThread):
                 self.release.get("asset_url", ""),
                 destination,
                 progress_callback=on_progress,
+                expected_sha256=self.release.get("checksum_sha256", ""),
             )
             self.finished.emit(path, "")
         except Exception as e:
@@ -500,9 +501,11 @@ class NetSwitchApp:
         box.setWindowTitle(APP_NAME)
         box.setIcon(QMessageBox.Icon.Information)
         box.setText(f"发现新版本 {release['version']}")
+        checksum_hint = "已提供完整性校验" if release.get("checksum_sha256") else "未提供完整性校验"
         box.setInformativeText(
             f"当前版本：{__version__}\n"
             f"安装包：{release.get('asset_name', '')}\n\n"
+            f"校验状态：{checksum_hint}\n\n"
             "可以直接下载安装包，也可以打开 GitHub Release 页面手动查看。"
         )
         if release.get("body"):
@@ -529,6 +532,14 @@ class NetSwitchApp:
                 "当前是便携版，不能在运行中自动安装更新。请打开发布页手动下载新的便携版。",
             )
             self._open_url(RELEASES_URL)
+            return
+        if not release.get("checksum_sha256"):
+            QMessageBox.information(
+                None,
+                APP_NAME,
+                "当前 Release 未提供完整性校验文件，无法在软件内自动安装。请打开发布页手动下载并核对安装包后再运行。",
+            )
+            self._open_url(release.get("html_url") or RELEASES_URL)
             return
         if self._update_download_worker and self._update_download_worker.isRunning():
             return

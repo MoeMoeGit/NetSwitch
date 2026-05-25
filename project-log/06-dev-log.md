@@ -2,6 +2,35 @@
 
 ---
 
+## 2026-05-25（更新安装包完整性校验）
+
+**触发原因**：用户确认优化更新流程，希望保留软件内更新入口，但把“直接下载并运行外部安装器”的安全风险补上。
+
+**修改内容**：
+1. `update_manager.py` — 解析 GitHub Release 时同时读取安装包与 SHA-256 校验文件；下载后先做哈希比对，再替换到目标路径。
+2. `main.py` — 设置页的更新说明显示校验状态；若 Release 没提供校验文件，则不在软件内自动安装，直接引导用户去发布页手动下载。
+3. `.github/workflows/release.yml` — Release 构建流程新增安装器 SHA-256 文件生成与上传，保证软件内自动安装有可验证来源。
+4. `README.md`、`project-log/03-api-design.md`、`project-log/05-current-status.md`、`project-log/10-planning-log.md`、`project-log/12-design-decisions.md` — 同步记录更新校验策略与发布链路变化。
+
+**遇到的问题**：
+- 更新功能如果只是把远端二进制拉到本地再执行，安全边界太弱。
+- 需要兼顾用户体验和安全：不能因为 Release 没有校验文件就把手动下载入口也一并堵死。
+
+**解决方式**：
+- 把自动安装更新和手动打开发布页分开。
+- Release 缺少校验文件时，软件内自动安装直接退回到发布页，避免运行未验证的安装器。
+- 更新校验文件放在发布流程里生成，减少人为遗漏。
+
+**验证方式**：
+- 运行 `python -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py scripts\build.py scripts\generate_icon.py`。
+
+**验证结果**：
+- 静态编译通过。
+- 未执行真实 GitHub 下载与安装，原因是需要在线 Release 资源和会启动外部安装器。
+
+**本地产物清理**：
+- 本轮未生成构建产物。
+
 ## 2026-05-24（设置页增加检查更新与帮助反馈）
 
 **触发原因**：用户反馈软件更新流程太麻烦，希望把检查更新放进软件内，并在设置页增加作者信息、GitHub 主页和 Issue 入口。

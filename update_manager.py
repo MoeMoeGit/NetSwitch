@@ -1,5 +1,6 @@
 """更新检查模块 - 读取 GitHub Release 并下载安装包"""
 
+import hashlib
 import json
 import re
 import urllib.error
@@ -73,6 +74,39 @@ def _request_json(url, timeout=10):
         raise UpdateError(str(e)) from e
 
 
+def _request_text(url, timeout=10):
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = response.read()
+            for encoding in ("utf-8-sig", "utf-8", "gbk", "cp936", "mbcs"):
+                try:
+                    return data.decode(encoding)
+                except (LookupError, UnicodeDecodeError):
+                    continue
+            return data.decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", errors="ignore").strip()
+        except Exception:
+            pass
+        message = f"HTTP {e.code}"
+        if detail:
+            message = f"{message}: {detail}"
+        raise UpdateError(message) from e
+    except urllib.error.URLError as e:
+        raise UpdateError(str(e.reason or e)) from e
+    except Exception as e:
+        raise UpdateError(str(e)) from e
+
+
 def _select_asset(assets, version):
     preferred_names = [
         f"NetSwitch-Setup-{version}.exe",
@@ -88,6 +122,49 @@ def _select_asset(assets, version):
         if name.lower().endswith(".exe") and "setup" in name.lower():
             return asset
     return None
+
+
+def _select_checksum_asset(assets, installer_name, version):
+    preferred_names = [
+        f"{installer_name}.sha256",
+        f"{installer_name}.sha256.txt",
+        f"{installer_name}.txt",
+        f"NetSwitch-Setup-{version}.exe.sha256",
+        f"NetSwitch-Setup-{version}.sha256",
+    ]
+    asset_map = {asset.get("name", ""): asset for asset in assets or []}
+    for name in preferred_names:
+        if name in asset_map:
+            return asset_map[name]
+
+    for asset in assets or []:
+        name = asset.get("name", "")
+        lowered = name.lower()
+        if lowered.endswith(".sha256") or lowered.endswith(".sha256.txt") or lowered.endswith(".txt"):
+            if "setup" in lowered or version in lowered:
+                return asset
+    return None
+
+
+def _extract_sha256(text, asset_name=""):
+    if not text:
+        return ""
+
+    text = text.strip()
+    if not text:
+        return ""
+
+    if asset_name:
+        for line in text.splitlines():
+            if asset_name.lower() in line.lower():
+                match = re.search(r"\b([a-fA-F0-9]{64})\b", line)
+                if match:
+                    return match.group(1).lower()
+
+    match = re.search(r"\b([a-fA-F0-9]{64})\b", text)
+    if match:
+        return match.group(1).lower()
+    return ""
 
 
 def get_latest_release(current_version):
@@ -107,18 +184,42 @@ def get_latest_release(current_version):
     if not asset:
         raise UpdateError("未找到可下载的更新安装包")
 
+    asset_name = asset.get("name") or f"NetSwitch-Setup-{latest_version}.exe"
+    checksum_asset = _select_checksum_asset(release.get("assets", []), asset_name, latest_version)
+    checksum_name = ""
+    checksum_sha256 = ""
+    if checksum_asset:
+        checksum_name = checksum_asset.get("name") or ""
+        try:
+            checksum_sha256 = _extract_sha256(
+                _request_text(checksum_asset.get("browser_download_url") or "", timeout=10),
+                asset_name,
+            )
+        except UpdateError:
+            checksum_sha256 = ""
+
     return {
         "version": latest_version,
         "tag_name": release.get("tag_name") or f"v{latest_version}",
         "name": release.get("name") or f"NetSwitch v{latest_version}",
         "body": release.get("body") or "",
         "html_url": release.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases/latest",
-        "asset_name": asset.get("name") or f"NetSwitch-Setup-{latest_version}.exe",
+        "asset_name": asset_name,
         "asset_url": asset.get("browser_download_url") or "",
+        "checksum_name": checksum_name,
+        "checksum_sha256": checksum_sha256,
     }
 
 
-def download_file(url, destination, timeout=30, progress_callback=None, cancel_check=None):
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download_file(url, destination, timeout=30, progress_callback=None, cancel_check=None, expected_sha256=""):
     """下载文件到本地。"""
     request = urllib.request.Request(
         url,
@@ -146,6 +247,10 @@ def download_file(url, destination, timeout=30, progress_callback=None, cancel_c
                         progress_callback(downloaded, total)
         if downloaded <= 0:
             raise UpdateError("下载文件为空")
+        if expected_sha256:
+            actual_sha256 = _sha256_file(tmp_destination)
+            if actual_sha256.lower() != expected_sha256.lower():
+                raise UpdateError("下载包校验失败，SHA-256 不匹配")
         tmp_destination.replace(destination)
         return str(destination)
     except Exception:

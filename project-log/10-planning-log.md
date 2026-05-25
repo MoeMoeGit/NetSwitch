@@ -1,6 +1,6 @@
 # 规划决策记录
 
-> **最后更新**：2026-05-24
+> **最后更新**：2026-05-25
 
 ---
 
@@ -226,6 +226,50 @@
 - `README.md`
 - `project-log/05-current-status.md`
 - `project-log/06-dev-log.md`
+- `project-log/12-design-decisions.md`
+
+---
+
+### ADR-006 [2026-05-25] 软件内自动安装更新必须校验 Release 安装包完整性
+
+**状态**：已采用
+
+**替代关系**：无
+
+**背景与需求**：更新功能会直接下载并运行 GitHub Release 的安装器。若不做完整性校验，软件只是把远端二进制拉到本地再执行，供应链风险过高。
+
+**采用的方案**：
+
+1. Release 同时提供安装包和对应 SHA-256 校验文件。
+2. 软件内自动安装前先校验安装包哈希。
+3. 若 Release 未提供校验文件，则不在软件内自动安装，只引导用户打开发布页手动下载。
+
+**备选方案**：
+
+1. 直接下载后运行
+   - 优点：流程最短。
+   - 缺点：不验证下载内容，风险过高。
+   - 放弃原因：更新入口属于执行外部二进制，必须至少做完整性校验。
+
+2. 引入代码签名验证
+   - 优点：安全性更强。
+   - 缺点：发布和证书成本高，当前体量不适合。
+   - 放弃原因：现阶段用 SHA-256 校验已经足够把风险收敛很多。
+
+**决策依据**：
+
+- GitHub Release 本身已经是固定分发源，再加 SHA-256 校验可明显提升可信度。
+- 这不会改变用户的安装入口，只是增加一层完整性确认。
+
+**改动范围**：
+
+- `update_manager.py`
+- `.github/workflows/release.yml`
+- `main.py`
+- `README.md`
+- `project-log/05-current-status.md`
+- `project-log/06-dev-log.md`
+- `project-log/11-code-review-log.md`
 - `project-log/12-design-decisions.md`
 
 ---

@@ -2,7 +2,7 @@
 
 > 本项目不提供 HTTP API、RPC、WebSocket 或服务端接口。  
 > 本文件记录桌面应用调用的本机系统命令接口。  
-> **最后更新**：2026-05-24
+> **最后更新**：2026-05-25
 
 ## API 概览
 
@@ -13,6 +13,7 @@
 | PowerShell | `Get-NetIPInterface` | 查询 DHCP 状态 | 普通读取 |
 | PowerShell | `Get-NetRoute` | 查询默认网关 | 普通读取 |
 | PowerShell | `Get-DnsClientServerAddress` | 查询 DNS 服务器 | 普通读取 |
+| GitHub API | `https://api.github.com/repos/MoeMoeGit/NetSwitch/releases/latest` | 检查最新 Release、读取安装包与 SHA-256 校验文件 | 普通读取 |
 | 系统命令 | `netsh interface ip set address` | 设置 DHCP 或静态 IP | 管理员 |
 | 系统命令 | `netsh interface ip set/add dns` | 设置 DNS | 管理员 |
 | 系统命令 | `ping` | 验证网关可达性 | 普通读取 |
@@ -63,9 +64,11 @@ route print 0.0.0.0
 | `failed` | 应用失败 |
 
 当前实现对 `netsh` 失败会返回详细错误并进入回滚；配置保存采用原子替换。详见 `11-code-review-log.md`。
+更新检查会先读取 Release 的安装包和 `.sha256` 校验文件，再决定是否允许软件内自动安装。
 
 ## 变更记录
 
 | 日期 | 变更内容 | 原因 |
 |------|----------|------|
 | 2026-05-22 | 标注无服务端 API，并记录系统命令接口 | 桌面应用需要记录本地系统接口边界 |
+| 2026-05-25 | 补充 GitHub Release 校验文件接口 | 更新下载增加完整性校验 |

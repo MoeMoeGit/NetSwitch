@@ -1,6 +1,6 @@
 # 代码评审记录
 
-> **最后更新**：2026-05-22  
+> **最后更新**：2026-05-25
 > **验证方式**：全量阅读代码、project-log、README；运行 `python -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py scripts\build.py scripts\generate_icon.py`。  
 > **限制**：未执行真实网络切换，避免改动当前机器网络配置；涉及 `netsh` 行为的问题基于代码路径和 Windows 命令语义确认。
 
@@ -22,6 +22,7 @@ A 评审（发现） → B 验证 + 修复确认项 + 评审（发现）
 |------|--------|------|-----------|-----------------|
 | 1 | A: Codex | 2026-05-22 | 12 | — |
 | 2 | B: Codex（实机反馈修复） | 2026-05-22 | 3 | 3 |
+| 3 | E: Codex（更新完整性校验） | 2026-05-25 | 1 | 1 |
 
 ---
 
@@ -461,3 +462,26 @@ A 评审（发现） → B 验证 + 修复确认项 + 评审（发现）
 
 - 运行 `PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py scripts/build.py scripts/generate_icon.py`。
 - 本轮评审未执行真实 DHCP / 静态 IP 切换，原因是会修改本机网络配置。
+
+---
+
+## E — 更新完整性校验修复
+
+**评审人**：Codex
+**日期**：2026-05-25
+**范围**：更新检查、下载与安装链路、Release 发布流程。
+
+### 已确认问题
+
+| 问题 | 严重程度 | 状态 | 说明 |
+|------|----------|------|------|
+| E-01 软件内自动安装更新缺少完整性校验 | 高 | 已修复 | Release 现在会发布安装包对应的 SHA-256 文件；应用下载后先校验哈希，再运行安装器。若 Release 没有校验文件，软件内自动安装会退回到发布页手动下载。 |
+
+### 本轮验证结果
+
+- 静态编译通过。
+- 未执行真实 GitHub 下载与外部安装器启动，原因是需要在线 Release 资源且会启动外部进程。
+
+### E 验证方式
+
+- 运行 `python -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py scripts\build.py scripts\generate_icon.py`。
