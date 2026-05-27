@@ -23,7 +23,7 @@ class SettingsDialog(QDialog):
         self.version = version or "0.0.0"
 
         self.setWindowTitle("设置")
-        self.setFixedSize(340, 340)
+        self.setFixedWidth(340)
         self.setWindowFlags(
             self.windowFlags()
             & ~Qt.WindowType.WindowContextHelpButtonHint
@@ -31,7 +31,7 @@ class SettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setContentsMargins(16, 12, 16, 12)
 
         general_box = QGroupBox("常规")
         general_layout = QVBoxLayout(general_box)
@@ -89,14 +89,13 @@ class SettingsDialog(QDialog):
         help_layout.addLayout(link_row)
         layout.addWidget(help_box)
 
-        layout.addStretch()
-
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_close = QPushButton("关闭")
         btn_close.clicked.connect(self.accept)
         btn_layout.addWidget(btn_close)
         layout.addLayout(btn_layout)
+        self.adjustSize()
 
     def _on_startup_toggled(self, checked):
         self.startup_toggled.emit(checked)

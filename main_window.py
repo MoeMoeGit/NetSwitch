@@ -64,6 +64,8 @@ class ProfileCard(QWidget):
 
     clicked = pyqtSignal(str)        # profile_id
     double_clicked = pyqtSignal(str) # profile_id
+    activate_requested = pyqtSignal(str)  # profile_id
+    edit_requested = pyqtSignal(str)      # profile_id
     rename_requested = pyqtSignal(str, str)  # profile_id, new_name
 
     def __init__(self, profile, is_active=False, parent=None):
@@ -259,17 +261,21 @@ class ProfileCard(QWidget):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { min-width: 120px; }"
+            "QMenu::item { padding: 6px 24px 6px 12px; }"
+        )
         is_locked = self.profile.get("locked", False)
 
         act_activate = menu.addAction("激活")
-        act_activate.triggered.connect(lambda: self.clicked.emit(self.profile_id))
+        act_activate.triggered.connect(lambda: self.activate_requested.emit(self.profile_id))
+
+        act_edit = menu.addAction("编辑")
+        act_edit.triggered.connect(lambda: self.edit_requested.emit(self.profile_id))
 
         act_rename = menu.addAction("重命名")
         act_rename.setEnabled(not is_locked)
         act_rename.triggered.connect(self.start_rename)
-
-        act_detail = menu.addAction("查看详情")
-        act_detail.triggered.connect(lambda: self.double_clicked.emit(self.profile_id))
 
         menu.addSeparator()
 
@@ -482,6 +488,8 @@ class MainWindow(QWidget):
             card = ProfileCard(profile, is_active=(profile["id"] == active_id))
             card.clicked.connect(self._on_card_clicked)
             card.double_clicked.connect(self._on_card_double_clicked)
+            card.activate_requested.connect(self._on_card_activate_requested)
+            card.edit_requested.connect(self._on_card_edit_requested)
             card.rename_requested.connect(self._on_rename)
             self._card_layout.insertWidget(self._card_layout.count() - 1, card)
 
@@ -496,10 +504,25 @@ class MainWindow(QWidget):
         self._update_buttons()
 
     def _on_card_double_clicked(self, profile_id):
+        self._selected_id = profile_id
+        self._update_selection()
+        self._update_buttons()
+        active_id = self.config.get("active_profile_id", "default")
+        if profile_id != active_id:
+            self._on_activate()
+
+    def _on_card_activate_requested(self, profile_id):
+        self._selected_id = profile_id
+        self._update_selection()
+        self._update_buttons()
+        active_id = self.config.get("active_profile_id", "default")
+        if profile_id != active_id:
+            self._on_activate()
+
+    def _on_card_edit_requested(self, profile_id):
         profile = profile_manager.get_profile_by_id(self.config, profile_id)
-        if not profile:
-            return
-        self._open_edit_dialog(profile)
+        if profile:
+            self._open_edit_dialog(profile)
 
     def _update_selection(self):
         for i in range(self._card_layout.count()):
