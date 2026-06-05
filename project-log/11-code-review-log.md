@@ -485,3 +485,36 @@ A 评审（发现） → B 验证 + 修复确认项 + 评审（发现）
 ### E 验证方式
 
 - 运行 `python -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py scripts\build.py scripts\generate_icon.py`。
+
+---
+
+## F — 复核分类与确认项优化
+
+**评审人**：Codex
+**日期**：2026-06-05
+**范围**：按用户要求，对上一轮分析的每一条重新判断是 bug、优化还是待确认项；确认成立的项目直接做小范围修复。
+
+### 已确认并处理
+
+| 问题 | 分类 | 严重程度 | 状态 | 说明 |
+|------|------|----------|------|------|
+| F-01 开机恢复上次方案在启动阶段同步执行 | Bug / 性能 / 体验 | 中 | 已修复，待实机回归 | `main.py` 新增 `_RestoreProfileWorker`，开机恢复改为后台执行，避免进入 Qt event loop 前阻塞启动；恢复完成后再刷新网络状态。 |
+| F-02 同一网卡多 IPv4 时可能读取错当前配置 | Bug / 数据一致性 | 中 | 已修复，待多 IP 网卡回归 | `network_controller.py` 默认优先使用 `route print` 返回的默认路由接口 IP；读取 IP / 掩码 / DHCP / DNS / 网关时按该 IP 精确查询，避免按网卡别名取第一条 IPv4。 |
+| F-03 删除当前激活方案时，切回 DHCP 的 warning 无明确提示 | Bug / 交互 | 低 | 已修复，待实机回归 | `main_window.py` 在切回 DHCP 返回 `GATEWAY_UNREACHABLE` 时提示用户当前网络异常，再继续删除方案。 |
+| F-04 保存的窗口坐标越界时没有显式居中 | 优化 / 规格一致性 | 低 | 已优化 | `main_window.py` 在保存坐标不属于任何屏幕时，把主窗口移动到主屏幕可用区域中心。 |
+| F-05 project-log 部分描述落后于代码 | 文档风险 | 低 | 已修复 | 同步 `01-function-design.md` 和 `04-project-architecture.md` 中关于状态检测线程、默认路由排序和单实例枚举的描述。 |
+
+### 待确认问题
+
+| 问题 | 分类 | 影响 | 验证 / 决策需求 |
+|------|------|------|----------------|
+| DHCP 切换中间态 `default adapter not found` 日志噪声 | 待确认优化 | 不影响最终切换，但影响日志可读性 | 需要 Windows DHCP 慢获取环境复测，确认新默认路由识别顺序是否已降低噪声。 |
+| 无默认网关 / 隔离网段静态 IP 是否正式支持 | 产品决策 | 当前编辑和切换都默认静态 IP 必须有网关 | 需要确认目标用户是否需要无网关静态方案。 |
+| 内置更新下载安装器后退出并启动安装器的完整流程 | 待实机验证 | 可能受 Inno Setup 关闭/重启应用流程影响 | 需要已安装版本 Windows 实机验证。 |
+
+### F 验证方式
+
+- 运行 `PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py scripts/build.py scripts/generate_icon.py`。
+- 运行不触网的 monkeypatch 脚本验证 `network_controller.get_default_adapter_ip()` 按默认路由 metric 选择接口 IP，并验证 `get_current_ip_config(adapter_ip)` 按指定 IP 精确读取配置。
+- 运行 `git diff --check` 检查行尾空格等提交前格式问题。
+- 本轮未执行真实 DHCP / 静态 IP 切换，原因是会修改本机网络配置。

@@ -395,4 +395,40 @@
 
 ---
 
+## 2026-06-05（复核分类与确认项优化）
+
+**触发原因**：用户要求对上一轮分析的每一条重新判断是 bug 还是优化点，确认成立后直接优化掉。
+
+**修改内容**：
+1. `main.py` — 新增 `_RestoreProfileWorker`，把开机恢复上次方案改为后台执行，避免启动阶段同步执行网络切换阻塞 UI。
+2. `network_controller.py` — 默认网卡识别改为优先使用 `route print` 的接口 IP；读取当前 IP / 掩码 / DHCP / DNS / 网关时按 adapter IP 精确查询，降低同一网卡多 IPv4 取错配置的风险。
+3. `main_window.py` — 删除当前激活方案前切回 DHCP 若返回 warning，会提示用户当前网络异常；保存窗口坐标越界时显式居中到主屏幕。
+4. `project-log/11-code-review-log.md` — 追加 F 轮评审，区分已确认问题和待确认问题。
+5. `project-log/05-current-status.md` — 更新当前状态、待处理项、未解决问题和任务交接。
+6. `project-log/01-function-design.md`、`project-log/04-project-architecture.md` — 同步状态检测、默认路由识别和单实例唤起等已变化描述。
+7. `main.py` — 复查时补充退出保护，网络切换 / 开机恢复未完成时提示等待，避免 QThread 运行中退出应用。
+
+**遇到的问题**：
+- 真实 DHCP / 静态 IP 切换、多 IPv4 网卡和内置更新安装流程都需要 Windows 实机环境，本轮只能做静态验证。
+- 无默认网关静态 IP 是否正式支持属于产品决策，未擅自改变输入规则。
+
+**解决方式**：
+- 只修复确认成立且范围可控的问题；需要实机或产品判断的项目保留为待确认。
+
+**验证方式**：
+- 运行 `PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py scripts/build.py scripts/generate_icon.py`。
+- 运行不触网的 monkeypatch 脚本验证 `network_controller.get_default_adapter_ip()` 按默认路由 metric 选择接口 IP，并验证 `get_current_ip_config(adapter_ip)` 按指定 IP 精确读取配置。
+- 运行 `git diff --check` 检查行尾空格等提交前格式问题。
+
+**验证结果**：
+- 静态编译通过。
+- 不触网函数级检查通过。
+- `git diff --check` 通过。
+- 未执行真实 DHCP / 静态 IP 切换，原因是会修改本机网络配置。
+
+**本地产物清理**：
+- 已删除本轮静态编译产生的 `__pycache__/` 和 `scripts/__pycache__/`。
+
+---
+
 <!-- 新记录追加在上方分隔线之后、旧记录之前 -->

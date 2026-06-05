@@ -101,15 +101,20 @@ def _run_netsh(args, timeout=15):
         return False, str(e)
 
 
+def _ps_quote(value):
+    """PowerShell 单引号字符串转义。"""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def get_default_adapter_ip():
     """获取系统当前优先网卡的 IP 地址（路由表 metric 最小的默认路由）"""
-    adapter_ip = _get_default_adapter_ip_from_powershell()
-    if adapter_ip:
-        _log_debug(f"default adapter from powershell: {adapter_ip}")
-        return adapter_ip
     adapter_ip = _get_default_adapter_ip_from_route()
     if adapter_ip:
         _log_debug(f"default adapter from route: {adapter_ip}")
+        return adapter_ip
+    adapter_ip = _get_default_adapter_ip_from_powershell()
+    if adapter_ip:
+        _log_debug(f"default adapter from powershell: {adapter_ip}")
     else:
         _log_error("default adapter not found")
     return adapter_ip
@@ -178,7 +183,10 @@ def _decode_command_output(data):
 
 def get_adapter_name_by_ip(ip):
     """根据 IP 地址获取网卡名称"""
-    name = _run_ps(f"Get-NetIPAddress -IPAddress {ip} | Select-Object -ExpandProperty InterfaceAlias")
+    name = _run_ps(
+        f"Get-NetIPAddress -IPAddress {_ps_quote(ip)} | "
+        "Select-Object -First 1 -ExpandProperty InterfaceAlias"
+    )
     return name if name else None
 
 
@@ -194,10 +202,10 @@ def get_current_ip_config(adapter_ip=None):
     if not adapter_name:
         return config
 
-    # IP 和前缀长度
+    # IP 和前缀长度。按 adapter_ip 精确读取，避免同一网卡多 IPv4 时取到第一条其它地址。
     content = _run_ps(
-        f'Get-NetIPAddress -InterfaceAlias "{adapter_name}" -AddressFamily IPv4 '
-        f"| Select-Object -Property IPAddress, PrefixLength"
+        f"Get-NetIPAddress -IPAddress {_ps_quote(adapter_ip)} "
+        "| Select-Object -First 1 -Property IPAddress, PrefixLength"
     )
     match = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+(\d+)", content)
     if match:
@@ -211,8 +219,10 @@ def get_current_ip_config(adapter_ip=None):
 
     # 是否 DHCP
     dhcp_content = _run_ps(
-        f'Get-NetIPInterface -InterfaceAlias "{adapter_name}" -AddressFamily IPv4 '
-        f"| Select-Object -Property Dhcp"
+        f"Get-NetIPAddress -IPAddress {_ps_quote(adapter_ip)} | "
+        "ForEach-Object { "
+        "Get-NetIPInterface -InterfaceIndex $_.InterfaceIndex -AddressFamily IPv4 "
+        "} | Select-Object -First 1 -Property Dhcp"
     )
     config["dhcp"] = "True" in dhcp_content or "Enabled" in dhcp_content
 
@@ -223,8 +233,10 @@ def get_current_ip_config(adapter_ip=None):
 
     # DNS
     dns_content = _run_ps(
-        f'Get-DnsClientServerAddress -InterfaceAlias "{adapter_name}" '
-        f"| Select-Object -ExpandProperty ServerAddresses"
+        f"Get-NetIPAddress -IPAddress {_ps_quote(adapter_ip)} | "
+        "ForEach-Object { "
+        "Get-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -AddressFamily IPv4 "
+        "} | Select-Object -ExpandProperty ServerAddresses"
     )
     dns_matches = re.findall(r"(\d+\.\d+\.\d+\.\d+)", dns_content)
     if len(dns_matches) >= 1:
@@ -243,9 +255,12 @@ def get_gateway(adapter_ip=None):
         return None
 
     gateway = _run_ps(
-        f'Get-NetRoute -DestinationPrefix "0.0.0.0/0" '
-        f"-InterfaceAlias (Get-NetIPAddress -IPAddress {adapter_ip}).InterfaceAlias "
-        f"| Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop"
+        f"Get-NetIPAddress -IPAddress {_ps_quote(adapter_ip)} | "
+        "ForEach-Object { "
+        "Get-NetRoute -DestinationPrefix '0.0.0.0/0' -InterfaceIndex $_.InterfaceIndex "
+        "-ErrorAction SilentlyContinue "
+        "} | Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } | "
+        "Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop"
     )
     match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", gateway)
     if match and validate_ipv4(match.group(1)):

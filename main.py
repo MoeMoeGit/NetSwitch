@@ -170,6 +170,18 @@ class _StatusCheckWorker(QThread):
         self.finished.emit(status, adapter_ip, gateway)
 
 
+class _RestoreProfileWorker(QThread):
+    finished = pyqtSignal(str, str, str)  # profile_id, status, message
+
+    def __init__(self, profile):
+        super().__init__()
+        self.profile = profile
+
+    def run(self):
+        status, message = network_controller.apply_profile(self.profile)
+        self.finished.emit(self.profile["id"], status, message or "")
+
+
 class _UpdateCheckWorker(QThread):
     finished = pyqtSignal(object, str)  # release dict or None, error
 
@@ -246,6 +258,7 @@ class NetSwitchApp:
             "gateway": None,
         }
         self._status_worker = None
+        self._restore_worker = None
         self._tray_worker = None
         self._is_switching = False
         self._update_check_worker = None
@@ -258,9 +271,9 @@ class NetSwitchApp:
         # 开机恢复方案
         if self.config.get("restore_last_on_boot"):
             self._restore_last_profile()
-
-        # 启动时执行一次网络状态检测，设置初始图标颜色
-        QTimer.singleShot(0, self._check_network_status)
+        else:
+            # 启动时执行一次网络状态检测，设置初始图标颜色
+            QTimer.singleShot(0, self._check_network_status)
 
     def _update_tray(self):
         profiles = profile_manager.get_profiles(self.config)
@@ -293,13 +306,32 @@ class NetSwitchApp:
     def _restore_last_profile(self):
         active = profile_manager.get_active_profile(self.config)
         if active and active["id"] != "default":
-            status, _ = network_controller.apply_profile(active)
-            if status != network_controller.FAILED:
-                profile_manager.update_last_used(self.config, active["id"])
+            self.tray.update_status("switching")
+            self._restore_worker = _RestoreProfileWorker(active)
+            self._restore_worker.finished.connect(self._on_restore_last_profile_finished)
+            self._restore_worker.start()
+            return
+        QTimer.singleShot(0, self._check_network_status)
+
+    def _on_restore_last_profile_finished(self, profile_id, status, message):
+        self._restore_worker = None
+        if status == network_controller.FAILED:
+            self.tray.update_status("error")
+            if message:
+                self.tray.setToolTip(f"NetSwitch - 开机恢复失败：{message}")
+            QMessageBox.warning(None, APP_NAME, f"开机恢复上次方案失败：{message}")
+        else:
+            profile_manager.update_last_used(self.config, profile_id)
+            self._update_tray()
+            self.tray.update_status(
+                "warning" if status == network_controller.GATEWAY_UNREACHABLE else "normal"
+            )
+        self._check_network_status()
 
     def _on_tray_profile_selected(self, profile_id):
         if (
             self._is_switching
+            or (self._restore_worker and self._restore_worker.isRunning())
             or (self._tray_worker and self._tray_worker.isRunning())
             or (self.main_window and self.main_window.is_applying())
             or network_controller._APPLY_LOCK.locked()
@@ -585,6 +617,7 @@ class NetSwitchApp:
     def _is_network_switching(self):
         return (
             self._is_switching
+            or (self._restore_worker and self._restore_worker.isRunning())
             or (self._tray_worker and self._tray_worker.isRunning())
             or (self.main_window and self.main_window.is_applying())
             or network_controller._APPLY_LOCK.locked()
@@ -592,6 +625,9 @@ class NetSwitchApp:
 
     def quit(self):
         installer = self._pending_update_installer
+        if not installer and self._is_network_switching():
+            QMessageBox.information(None, APP_NAME, "正在切换网络，请完成后再退出。")
+            return
         if installer:
             try:
                 subprocess.Popen(

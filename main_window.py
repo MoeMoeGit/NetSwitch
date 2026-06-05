@@ -593,6 +593,15 @@ class MainWindow(QWidget):
             self._update_buttons()
             return
 
+        if status == network_controller.GATEWAY_UNREACHABLE:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "网络状态异常",
+                f"已切换回 DHCP，但当前网络状态异常：{message or '网关不可达'}。\n"
+                "将继续删除方案，请确认当前网络是否可用。",
+            )
+
         self._do_delete_profile(profile_id)
 
     def _do_delete_profile(self, profile_id):
@@ -747,6 +756,14 @@ class MainWindow(QWidget):
             if geo.contains(x, y):
                 self.move(x, y)
                 return
+
+        primary = QGuiApplication.primaryScreen()
+        if primary:
+            geo = primary.availableGeometry()
+            self.move(
+                geo.x() + (geo.width() - self.width()) // 2,
+                geo.y() + (geo.height() - self.height()) // 2,
+            )
 
     def _save_position(self):
         pos = self.pos()
