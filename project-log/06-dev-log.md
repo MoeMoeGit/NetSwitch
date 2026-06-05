@@ -431,4 +431,37 @@
 
 ---
 
+## 2026-06-05（发布 v1.4.2）
+
+**触发原因**：用户要求在确认 bug 修复后推进一个新版本，并上传到 GitHub 触发新版本构建。
+
+**修改内容**：
+1. `VERSION` — 版本号从 `1.4.1` 推进到 `1.4.2`。
+2. `pyproject.toml` — 项目版本同步为 `1.4.2`。
+3. `project-log/05-current-status.md` — 当前版本更新为 V1.4.2，并记录本版包含开机恢复后台化、多 IPv4 精确读取、删除 warning 提示、窗口越界居中和退出保护。
+4. `project-log/07-deployment.md` — 同步 Release 流程中的 SHA-256 校验文件上传，移除 README 构建命令的过期已知问题。
+
+**遇到的问题**：
+- 当前本地没有 `v1.4.1` tag，但代码版本已是 `1.4.1`；本轮按补丁版本推进到 `1.4.2` 并计划创建 `v1.4.2` tag。
+
+**解决方式**：
+- 提交版本号和文档更新后，推送 `main` 和 `v1.4.2` tag；`.github/workflows/release.yml` 会在 tag push 时触发构建和 Release 创建。
+
+**验证方式**：
+- 运行 `PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py scripts/build.py scripts/generate_icon.py`。
+- 运行不触网的 monkeypatch 脚本验证 `network_controller.get_default_adapter_ip()` 和 `get_current_ip_config(adapter_ip)` 的关键读取行为。
+- 运行 `git diff --check`。
+
+**验证结果**：
+- 静态编译通过。
+- 不触网函数级检查通过。
+- 版本一致性检查通过：`VERSION`、`pyproject.toml` 和 `project-log/05-current-status.md` 均为 `1.4.2` / V1.4.2。
+- `git diff --check` 通过。
+- 未执行真实 DHCP / 静态 IP 切换，原因是会修改本机网络配置。
+
+**本地产物清理**：
+- 已删除本轮静态编译产生的 `__pycache__/` 和 `scripts/__pycache__/`。
+
+---
+
 <!-- 新记录追加在上方分隔线之后、旧记录之前 -->

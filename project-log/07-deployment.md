@@ -1,6 +1,6 @@
 # 部署 / 打包
 
-> **最后更新**：2026-05-22
+> **最后更新**：2026-06-05
 
 ## 部署环境
 
@@ -54,12 +54,14 @@ on:
 5. 运行 PyInstaller 打包 exe。
 6. 安装 Inno Setup。
 7. 构建安装包。
-8. 创建 GitHub Release 并上传 exe / setup。
+8. 生成安装包 SHA-256 校验文件。
+9. 创建 GitHub Release 并上传 exe / setup / setup.sha256。
 
 ## 历史发布问题
 
 - 旧版本 Release 曾只上传便携版 `NetSwitch.exe`，没有生成安装包。当前 `.github/workflows/release.yml` 已包含安装 Inno Setup、编译 `scripts/installer_output.iss`、上传 `installer_output/NetSwitch-Setup-<version>.exe` 的步骤。
-- 修改 CI 时必须确认 Release 同时包含便携版 exe 和安装包。
+- V1.4.1 起 Release 会同时上传安装包 SHA-256 校验文件，软件内更新下载后必须先校验哈希；若 Release 缺少校验文件，则应用引导用户打开发布页手动下载。
+- 修改 CI 时必须确认 Release 同时包含便携版 exe、安装包和安装包 `.sha256`。
 
 ## 回滚方案
 
@@ -69,11 +71,11 @@ on:
 
 ## 已知问题
 
-- README 当前构建安装包命令需要同步修正为 `iscc scripts/installer_output.iss`。
 - 安装包可选开机自启写入 HKCU Run；应用内也可通过托盘或设置弹窗切换开机自启。
 
 ## 变更记录
 
 | 日期 | 变更内容 | 原因 |
 |------|----------|------|
+| 2026-06-05 | 同步 Release SHA-256 校验产物和发布流程 | V1.4.1 起软件内更新要求安装包完整性校验 |
 | 2026-05-22 | 补齐桌面应用打包和发布流程 | 恢复 project-log |
