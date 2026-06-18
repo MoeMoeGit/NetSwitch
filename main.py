@@ -67,7 +67,8 @@ def _try_bring_existing_window():
         if length > 0:
             buf = ctypes.create_unicode_buffer(length + 1)
             GetWindowTextW(hwnd, buf, length + 1)
-            if target_title in buf.value:
+            # 严格相等避免误命中含 NetSwitch 字样的其它窗口（如 IDE 编辑源码、浏览器仓库页）
+            if buf.value == target_title:
                 found.append(hwnd)
         return True
 
@@ -225,6 +226,19 @@ class _UpdateDownloadWorker(QThread):
             self.finished.emit("", str(e))
 
 
+# ── 后台线程：首次启动时的网络配置导入 ──
+class _FirstDetectWorker(QThread):
+    """首次启动时（不存在 profiles.json）后台检测当前静态 IP，避免阻塞 QApplication 启动。"""
+    finished = pyqtSignal(object)  # detected profile dict 或 None
+
+    def run(self):
+        try:
+            profile_data = profile_manager.detect_and_import_current_static()
+        except Exception:
+            profile_data = None
+        self.finished.emit(profile_data)
+
+
 # ── 主应用 ──
 
 class NetSwitchApp:
@@ -264,12 +278,16 @@ class NetSwitchApp:
         self._update_check_worker = None
         self._update_download_worker = None
         self._pending_update_installer = None
+        self._first_detect_worker = None
 
         # 更新托盘（含开机自启状态）
         self._update_tray()
 
-        # 开机恢复方案
-        if self.config.get("restore_last_on_boot"):
+        # 首次启动：load_config 已标记 first_run_pending，开后台线程检测当前静态 IP；
+        # 之后再走开机恢复 / 状态检测流程。
+        if self.config.get("first_run_pending"):
+            self._kick_off_first_detect()
+        elif self.config.get("restore_last_on_boot"):
             self._restore_last_profile()
         else:
             # 启动时执行一次网络状态检测，设置初始图标颜色
@@ -279,6 +297,29 @@ class NetSwitchApp:
         profiles = profile_manager.get_profiles(self.config)
         active_id = self.config.get("active_profile_id", "default")
         self.tray.update_profiles(profiles, active_id)
+
+    def _kick_off_first_detect(self):
+        """首次启动后台检测；不阻塞 QApplication 启动，托盘可以先显示。"""
+        self._first_detect_worker = _FirstDetectWorker()
+        self._first_detect_worker.finished.connect(self._on_first_detect_finished)
+        self._first_detect_worker.start()
+
+    def _on_first_detect_finished(self, profile_data):
+        self._first_detect_worker = None
+        if profile_data:
+            # 仅当用户尚未手动切换（active 仍为 default）时，才把检测到的方案设为激活
+            profile_manager.add_imported_profile(self.config, profile_data)
+            self._update_tray()
+            if self.main_window:
+                self.main_window._load_cards()
+        else:
+            profile_manager.clear_first_run_pending(self.config)
+
+        # 走完正常的开机流程
+        if self.config.get("restore_last_on_boot"):
+            self._restore_last_profile()
+        else:
+            self._check_network_status()
 
     def _check_network_status(self):
         active = profile_manager.get_active_profile(self.config)
@@ -387,12 +428,20 @@ class NetSwitchApp:
             self.main_window = MainWindow(self.config)
             self.main_window.profile_applied.connect(self._on_profile_applied)
             self.main_window.profile_saved.connect(self._on_profile_saved)
+            self.main_window.apply_failed.connect(self._on_main_window_apply_failed)
             self.main_window.window_closed.connect(self._on_window_closed)
 
-        self.main_window.show()
+        # showNormal() 会清理 WindowMinimized 状态：用户先最小化、再关闭到托盘后，
+        # 再次唤起时如果只调 show()，窗口会保持最小化状态显示在任务栏，看起来"没反应"。
+        self.main_window.showNormal()
         self.main_window.raise_()
         self.main_window.activateWindow()
         self.main_window.update_network_snapshot(self._last_network_snapshot)
+        self._check_network_status()
+
+    def _on_main_window_apply_failed(self):
+        """主窗口入口的方案切换失败：同步托盘为 error 并触发一次状态检测。"""
+        self.tray.update_status("error")
         self._check_network_status()
 
     def _on_profile_applied(self, profile_id):

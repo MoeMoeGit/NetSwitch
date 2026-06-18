@@ -1,6 +1,7 @@
 """网络控制模块 - 执行 netsh 命令、ping 验证、回滚逻辑、网卡自动检测"""
 
 import subprocess
+import json
 import re
 import os
 import tempfile
@@ -191,58 +192,85 @@ def get_adapter_name_by_ip(ip):
 
 
 def get_current_ip_config(adapter_ip=None):
-    """获取当前网卡的 IP 配置。不传 adapter_ip 则自动检测。"""
+    """获取当前网卡的 IP 配置。不传 adapter_ip 则自动检测。
+
+    通过单次 PowerShell 调用 ConvertTo-Json 返回所有字段，避免多次 PS 进程启动。
+    """
     config = {}
     if not adapter_ip:
         adapter_ip = get_default_adapter_ip()
     if not adapter_ip:
         return config
 
-    adapter_name = get_adapter_name_by_ip(adapter_ip)
-    if not adapter_name:
+    # adapter_ip 已通过 validate_ipv4 校验，仅含数字和点，安全可拼接进 PS 字符串
+    ps = (
+        f"$ip = '{adapter_ip}'; "
+        "$ipObj = Get-NetIPAddress -IPAddress $ip -AddressFamily IPv4 "
+        "-ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "if (-not $ipObj) { return }; "
+        "$iface = Get-NetIPInterface -InterfaceIndex $ipObj.InterfaceIndex "
+        "-AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "$gw = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' "
+        "-InterfaceIndex $ipObj.InterfaceIndex -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } | "
+        "Sort-Object RouteMetric | Select-Object -First 1).NextHop; "
+        "$dns = @((Get-DnsClientServerAddress -InterfaceIndex $ipObj.InterfaceIndex "
+        "-AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses); "
+        "[PSCustomObject]@{"
+        "IPAddress=$ipObj.IPAddress; "
+        "PrefixLength=$ipObj.PrefixLength; "
+        "InterfaceAlias=$ipObj.InterfaceAlias; "
+        "Dhcp=if ($iface) { [string]$iface.Dhcp } else { '' }; "
+        "Gateway=$gw; "
+        "Dns=$dns"
+        "} | ConvertTo-Json -Compress"
+    )
+    raw = _run_ps(ps)
+    if not raw:
+        return config
+    try:
+        data = json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        _log_error(f"get_current_ip_config: failed to parse json: {raw[:200]}")
         return config
 
-    # IP 和前缀长度。按 adapter_ip 精确读取，避免同一网卡多 IPv4 时取到第一条其它地址。
-    content = _run_ps(
-        f"Get-NetIPAddress -IPAddress {_ps_quote(adapter_ip)} "
-        "| Select-Object -First 1 -Property IPAddress, PrefixLength"
-    )
-    match = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+(\d+)", content)
-    if match:
-        config["ip"] = match.group(1)
-        prefix_len = int(match.group(2))
-        mask_bits = (0xFFFFFFFF >> (32 - prefix_len)) << (32 - prefix_len)
-        config["mask"] = (
-            f"{(mask_bits >> 24) & 0xFF}.{(mask_bits >> 16) & 0xFF}"
-            f".{(mask_bits >> 8) & 0xFF}.{mask_bits & 0xFF}"
-        )
+    if not isinstance(data, dict):
+        return config
 
-    # 是否 DHCP
-    dhcp_content = _run_ps(
-        f"Get-NetIPAddress -IPAddress {_ps_quote(adapter_ip)} | "
-        "ForEach-Object { "
-        "Get-NetIPInterface -InterfaceIndex $_.InterfaceIndex -AddressFamily IPv4 "
-        "} | Select-Object -First 1 -Property Dhcp"
-    )
-    config["dhcp"] = "True" in dhcp_content or "Enabled" in dhcp_content
+    ip_addr = data.get("IPAddress")
+    if isinstance(ip_addr, str) and validate_ipv4(ip_addr):
+        config["ip"] = ip_addr
 
-    # 网关
-    gw = get_gateway(adapter_ip)
-    if gw:
-        config["gateway"] = gw
+    prefix_len = data.get("PrefixLength")
+    if isinstance(prefix_len, int) and 0 <= prefix_len <= 32:
+        if prefix_len == 0:
+            config["mask"] = "0.0.0.0"
+        else:
+            mask_bits = (0xFFFFFFFF >> (32 - prefix_len)) << (32 - prefix_len)
+            config["mask"] = (
+                f"{(mask_bits >> 24) & 0xFF}.{(mask_bits >> 16) & 0xFF}"
+                f".{(mask_bits >> 8) & 0xFF}.{mask_bits & 0xFF}"
+            )
 
-    # DNS
-    dns_content = _run_ps(
-        f"Get-NetIPAddress -IPAddress {_ps_quote(adapter_ip)} | "
-        "ForEach-Object { "
-        "Get-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -AddressFamily IPv4 "
-        "} | Select-Object -ExpandProperty ServerAddresses"
-    )
-    dns_matches = re.findall(r"(\d+\.\d+\.\d+\.\d+)", dns_content)
-    if len(dns_matches) >= 1:
-        config["dns"] = dns_matches[0]
-    if len(dns_matches) >= 2:
-        config["dns_secondary"] = dns_matches[1]
+    dhcp_raw = str(data.get("Dhcp", ""))
+    config["dhcp"] = "Enabled" in dhcp_raw or "True" in dhcp_raw
+
+    gw = data.get("Gateway")
+    if isinstance(gw, str):
+        m = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", gw)
+        if m and validate_ipv4(m.group(1)):
+            config["gateway"] = m.group(1)
+
+    dns = data.get("Dns")
+    if isinstance(dns, str):
+        dns = [dns]
+    elif not isinstance(dns, list):
+        dns = []
+    valid_dns = [d for d in dns if isinstance(d, str) and validate_ipv4(d)]
+    if valid_dns:
+        config["dns"] = valid_dns[0]
+        if len(valid_dns) >= 2:
+            config["dns_secondary"] = valid_dns[1]
 
     return config
 
@@ -351,7 +379,7 @@ def apply_profile(profile):
                 if not ok:
                     return _fail_with_rollback(adapter_name, old_config, f"设置备用 DNS 失败：{msg}")
 
-        _wait_for_profile_to_settle(profile)
+        _wait_for_profile_to_settle(profile, old_config=old_config)
 
         current_ip = get_default_adapter_ip() or adapter_ip
         gw = get_gateway(current_ip)
@@ -442,13 +470,25 @@ def _rollback(adapter_name, old_config):
         return False, str(e)
 
 
-def _wait_for_profile_to_settle(profile, timeout=5):
-    """等待网络配置短暂生效；最多等待 timeout 秒，避免固定卡住。"""
+def _wait_for_profile_to_settle(profile, old_config=None, timeout=5):
+    """等待网络配置短暂生效；最多等待 timeout 秒，避免固定卡住。
+
+    DHCP 切换：旧静态 IP 在 DHCP 重新协商完成前可能仍然在线，因此不能仅看
+    `get_default_adapter_ip()` 是否非空——需要确认 IP 已变化（DHCP 给了新 IP）
+    或 DHCP 标志已启用（已切换 DHCP 模式但 IP 恰好相同）。
+    """
+    old_ip = (old_config or {}).get("ip")
     deadline = time.time() + timeout
     while time.time() < deadline:
         if profile.get("ip_mode") == "dhcp":
-            if get_default_adapter_ip():
-                return
+            current_ip = get_default_adapter_ip()
+            if current_ip and not current_ip.startswith("169.254."):
+                if current_ip != old_ip:
+                    return
+                # IP 没变（DHCP 可能给了同一个 IP）；查 Dhcp 标志确认
+                cfg = get_current_ip_config(current_ip)
+                if cfg.get("dhcp"):
+                    return
         else:
             current = get_current_ip_config()
             if current.get("ip") == profile.get("ip_address"):

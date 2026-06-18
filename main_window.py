@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QMenu, QLineEdit, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect,
     QApplication,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint, QThread
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint, QRect, QThread
 from PyQt6.QtGui import (
     QFont, QColor, QPainter, QPainterPath, QAction, QPen, QBrush,
     QGuiApplication,
@@ -67,6 +67,7 @@ class ProfileCard(QWidget):
     double_clicked = pyqtSignal(str) # profile_id
     activate_requested = pyqtSignal(str)  # profile_id
     edit_requested = pyqtSignal(str)      # profile_id
+    delete_requested = pyqtSignal(str)    # profile_id
     rename_requested = pyqtSignal(str, str)  # profile_id, new_name
 
     def __init__(self, profile, is_active=False, parent=None):
@@ -285,17 +286,9 @@ class ProfileCard(QWidget):
         act_delete.setEnabled(not is_locked)
         if not is_locked:
             act_delete.setForeground(QColor(COLOR_RED_TEXT))
-        act_delete.triggered.connect(self._on_delete)
+        act_delete.triggered.connect(lambda: self.delete_requested.emit(self.profile_id))
 
         menu.exec(event.globalPos())
-
-    def _on_delete(self):
-        # 通过信号传递给主窗口处理
-        parent = self.parent()
-        while parent and not isinstance(parent, MainWindow):
-            parent = parent.parent()
-        if parent:
-            parent._delete_profile(self.profile_id)
 
 
 # ── 主窗口 ──
@@ -304,6 +297,7 @@ class MainWindow(QWidget):
 
     profile_applied = pyqtSignal(str)
     profile_saved = pyqtSignal()
+    apply_failed = pyqtSignal()  # 主窗口入口的方案切换失败时通知主程序刷新托盘和网络状态
     window_closed = pyqtSignal()
 
     def __init__(self, config, parent=None):
@@ -356,7 +350,8 @@ class MainWindow(QWidget):
             QWidget#cardContainer {{
                 background: transparent;
             }}
-            QPushButton#titleButton {{
+            QPushButton#titleButton,
+            QPushButton#titleClose {{
                 border: none;
                 background: transparent;
                 min-height: 32px;
@@ -367,6 +362,9 @@ class MainWindow(QWidget):
             QPushButton#titleButton:hover {{
                 background: rgba(10, 132, 255, 22);
                 color: {ui_style.TEXT};
+            }}
+            QPushButton#titleClose {{
+                font-size: 14px;
             }}
             QPushButton#titleClose:hover {{
                 background: {ui_style.DANGER};
@@ -409,10 +407,6 @@ class MainWindow(QWidget):
         btn_close = QPushButton("✕")
         btn_close.setObjectName("titleClose")
         btn_close.setFixedSize(46, 36)
-        btn_close.setStyleSheet(
-            "QPushButton { border: none; font-size: 14px; }"
-            f"QPushButton:hover {{ background: {COLOR_RED_HOVER}; color: white; }}"
-        )
         btn_close.clicked.connect(self._on_close)
         tb_layout.addWidget(btn_close)
 
@@ -508,6 +502,7 @@ class MainWindow(QWidget):
             card.double_clicked.connect(self._on_card_double_clicked)
             card.activate_requested.connect(self._on_card_activate_requested)
             card.edit_requested.connect(self._on_card_edit_requested)
+            card.delete_requested.connect(self._delete_profile)
             card.rename_requested.connect(self._on_rename)
             self._card_layout.insertWidget(self._card_layout.count() - 1, card)
 
@@ -664,12 +659,15 @@ class MainWindow(QWidget):
             self._update_buttons()
 
             if status == network_controller.FAILED:
+                # 失败时立即把状态栏 dot 置为 error，并通知主程序刷新托盘和重新检测网络
+                self.set_network_status("error")
                 for i in range(self._card_layout.count()):
                     item = self._card_layout.itemAt(i)
                     card = item.widget()
                     if isinstance(card, ProfileCard) and card.profile_id == profile["id"]:
                         card.show_result(False, message)
                         break
+                self.apply_failed.emit()
             else:
                 profile_manager.set_active_profile(self.config, profile["id"])
                 profile_manager.update_last_used(self.config, profile["id"])
@@ -723,12 +721,12 @@ class MainWindow(QWidget):
     def set_network_status(self, status):
         """由主程序调用，同步网络状态到状态栏 dot 颜色"""
         color_map = {
-            "normal": COLOR_GREEN,
-            "warning": "#D97706",
-            "error": "#F44336",
-            "switching": COLOR_GREEN,
+            "normal": ui_style.SUCCESS,
+            "warning": ui_style.WARNING,
+            "error": ui_style.DANGER,
+            "switching": ui_style.SUCCESS,
         }
-        color = color_map.get(status, COLOR_GREEN)
+        color = color_map.get(status, ui_style.SUCCESS)
         self._status_dot.setStyleSheet(f"color: {color}; font-size: 8px;")
 
     def _on_close(self):
@@ -768,10 +766,14 @@ class MainWindow(QWidget):
         if x is None or y is None:
             return
 
-        # 校验坐标在当前任意屏幕范围内
+        # 校验标题栏（左右整宽 + 顶部 36px）落在某块屏幕内，避免上次保存的窗口
+        # 位置只露左上角点在屏内、整窗大半飘出屏幕的情况。
+        width = self.width() or 340
+        title_rect = QRect(x, y, width, 36)
+
         for screen in QGuiApplication.screens():
             geo = screen.availableGeometry()
-            if geo.contains(x, y):
+            if geo.contains(title_rect):
                 self.move(x, y)
                 return
 

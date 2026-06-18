@@ -186,6 +186,12 @@ class EditDialog(QDialog):
         form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
         return form
 
+    def _grow_to_fit(self):
+        """切换字段显示后只增高、不收缩；避免反复切换造成弹窗上下抖动。"""
+        hint = self.sizeHint()
+        if hint.height() > self.height():
+            self.resize(self.width(), hint.height())
+
     def _set_invalid(self, widget, invalid):
         widget.setProperty("invalid", invalid)
         ui_style.polish(widget)
@@ -193,18 +199,18 @@ class EditDialog(QDialog):
     def _on_ip_mode_changed(self):
         is_static = self.radio_static.isChecked()
         self.ip_fields_widget.setVisible(is_static)
-        self.adjustSize()
+        self._grow_to_fit()
         self._validate()
 
     def _on_dns_mode_changed(self):
         is_manual = self.radio_dns_manual.isChecked()
         self.dns_fields_widget.setVisible(is_manual)
-        self.adjustSize()
+        self._grow_to_fit()
         self._validate()
 
     def _on_mask_changed(self, index):
         self.edit_mask_custom.setVisible(index == 3)
-        self.adjustSize()
+        self._grow_to_fit()
         self._validate()
 
     def _validate(self):

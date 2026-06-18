@@ -16,7 +16,7 @@ ACCENT_HOVER = "#0071E3"
 ACCENT_SOFT = "#EAF4FF"
 SUCCESS = "#34C759"
 SUCCESS_SOFT = "#E8F7ED"
-WARNING = "#C27A0A"
+WARNING = "#D97706"
 WARNING_SOFT = "#FFF4DC"
 DANGER = "#D92D20"
 DANGER_SOFT = "#FFF0EE"
@@ -174,7 +174,36 @@ QScrollArea {{
     background: transparent;
     border: none;
 }}
+"""
 
+# 菜单样式单独抽出，便于 QSystemTrayIcon 的 QMenu 复用而无需挂载完整表单样式。
+MENU_QSS = f"""
+QWidget {{
+    font-family: {FONT_FAMILY};
+    color: {TEXT};
+    font-size: 12px;
+}}
+
+QMenu {{
+    background: {SURFACE_STRONG};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 6px;
+}}
+
+QMenu::item {{
+    padding: 7px 24px 7px 12px;
+    border-radius: 6px;
+}}
+
+QMenu::item:selected {{
+    background: {ACCENT_SOFT};
+    color: {TEXT};
+}}
+"""
+
+# 主样式表附带菜单样式，使 COMMON_QSS 单独使用时菜单也美观
+COMMON_QSS = COMMON_QSS + f"""
 QMenu {{
     background: {SURFACE_STRONG};
     border: 1px solid {BORDER};

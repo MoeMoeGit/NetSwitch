@@ -8,12 +8,12 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 import ui_style
 
-# 图标背景色映射
+# 图标背景色映射 - 与 ui_style 状态色统一，避免托盘图标和主窗口状态指示色不一致
 _ICON_COLORS = {
-    "normal":    QColor(0x0E, 0x74, 0x90),   # 深青色
-    "warning":   QColor(0xD9, 0x77, 0x06),   # 橙黄色
-    "error":     QColor(0xDC, 0x26, 0x26),   # 红色
-    "switching": QColor(0x0E, 0x74, 0x90),   # 切换中同正常色
+    "normal":    QColor(ui_style.SUCCESS),    # 成功色（与状态栏 dot 同色）
+    "warning":   QColor(ui_style.WARNING),    # 警告色
+    "error":     QColor(ui_style.DANGER),     # 错误色
+    "switching": QColor(ui_style.SUCCESS),    # 切换中同正常色
 }
 
 ICON_SIZE = 32
@@ -78,7 +78,8 @@ class TrayIcon(QSystemTrayIcon):
 
     def _build_menu(self):
         self.menu = QMenu()
-        self.menu.setStyleSheet(ui_style.COMMON_QSS)
+        # 只挂菜单相关样式，避免把表单/按钮样式带到托盘菜单
+        self.menu.setStyleSheet(ui_style.MENU_QSS)
         self.menu.aboutToShow.connect(self.refresh_status_requested.emit)
         self.setContextMenu(self.menu)
 

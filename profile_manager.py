@@ -42,12 +42,13 @@ def ensure_config_dir():
 
 
 def load_config():
-    """加载配置文件。首次启动时检测当前网络状态。"""
+    """加载配置文件。首次启动时只创建默认配置并标记 first_run_pending；
+    实际网络检测延迟到 main.py 后台线程，避免阻塞 QApplication 启动。"""
     ensure_config_dir()
 
     if not CONFIG_FILE.exists():
         config = get_default_config()
-        _detect_and_save_current_config(config)
+        config["first_run_pending"] = True
         save_config(config)
         return config
 
@@ -73,24 +74,23 @@ def load_config():
     return config
 
 
-def _detect_and_save_current_config(config):
-    """首次启动时检测当前网络配置。DHCP → 激活默认方案；手动 → 创建"自定义"并激活。"""
+def detect_and_import_current_static():
+    """读取当前优先网卡的静态配置；如检测到非 DHCP 静态 IP 则返回 profile dict，否则 None。
+
+    后台线程调用：仅做只读检测和构造数据，不修改 config / 不写盘。
+    """
     try:
         import network_controller
 
         ip_config = network_controller.get_current_ip_config()
-
         if not ip_config.get("ip"):
-            return
-
-        # DHCP 模式，默认方案已创建，直接激活
+            return None
         if ip_config.get("dhcp", True):
-            return
+            return None
 
-        # 手动静态 IP，创建导入方案
         ip = ip_config.get("ip")
         mask = ip_config.get("mask", "255.255.255.0")
-        gateway = network_controller.get_gateway()
+        gateway = ip_config.get("gateway") or ""
         dns = ip_config.get("dns")
 
         profile_data = {
@@ -100,7 +100,7 @@ def _detect_and_save_current_config(config):
             "ip_mode": "static",
             "ip_address": ip,
             "subnet_mask": mask,
-            "gateway": gateway or "",
+            "gateway": gateway,
             "dns_mode": "manual" if dns else "auto",
             "last_used": datetime.now().isoformat(),
         }
@@ -111,11 +111,28 @@ def _detect_and_save_current_config(config):
             if dns_secondary:
                 profile_data["dns_secondary"] = dns_secondary
 
-        config["profiles"].append(profile_data)
-        config["active_profile_id"] = profile_data["id"]
+        return profile_data
 
     except Exception as e:
         print(f"检测网络配置失败: {e}")
+        return None
+
+
+def add_imported_profile(config, profile_data, set_active_if_default=True):
+    """把后台检测到的方案追加到 config。
+    若当前 active 仍为 default 且 set_active_if_default=True，则把新方案设为激活。
+    清除 first_run_pending 标记并落盘。"""
+    config["profiles"].append(profile_data)
+    if set_active_if_default and config.get("active_profile_id", "default") == "default":
+        config["active_profile_id"] = profile_data["id"]
+    config.pop("first_run_pending", None)
+    save_config(config)
+
+
+def clear_first_run_pending(config):
+    """首次启动检测未发现静态配置时，仅清除标记。"""
+    if config.pop("first_run_pending", None) is not None:
+        save_config(config)
 
 
 def save_config(config):
@@ -216,29 +233,6 @@ def update_profile(config, profile_id, **kwargs):
 
     save_config(config)
     return profile
-
-
-def delete_profile(config, profile_id):
-    """删除方案。返回 (success, message)。若方案处于激活状态，先切回 DHCP 再删除。"""
-    profile = get_profile_by_id(config, profile_id)
-    if not profile or profile.get("locked"):
-        return False, "无法删除此方案"
-
-    # 如果要删除的是当前激活方案，先切回 DHCP
-    if config.get("active_profile_id") == profile_id and profile_id != "default":
-        import network_controller
-        default_profile = get_profile_by_id(config, "default")
-        status, msg = network_controller.apply_profile(default_profile)
-        if status == network_controller.FAILED:
-            return False, "当前方案激活中，切换回默认失败，无法删除"
-
-    config["profiles"] = [p for p in config["profiles"] if p.get("id") != profile_id]
-
-    if config.get("active_profile_id") == profile_id:
-        config["active_profile_id"] = "default"
-
-    save_config(config)
-    return True, None
 
 
 def update_last_used(config, profile_id):

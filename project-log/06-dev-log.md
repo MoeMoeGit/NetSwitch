@@ -2,6 +2,70 @@
 
 ---
 
+## 2026-06-19（评审发现的 14 项 bug / 优化批量修复）
+
+**触发原因**：用户要求对全项目（不仅是 6-18 UI 改造）做一次完整评审，并把所有"确定是 bug 或可优化项"一次修完。本轮共 14 项，覆盖窗口生命周期、单实例检测、网络切换 settle、配色统一、首次启动阻塞、PowerShell 调用次数等。
+
+**修改内容**：
+1. `ui_style.py` — 抽出独立 `MENU_QSS`（QMenu 专用），`COMMON_QSS` 仍包含菜单段；`WARNING` 由 `#C27A0A` 改为 `#D97706`，与状态栏 dot 现有色一致，便于统一引用。
+2. `tray.py` — `_ICON_COLORS` 由硬编码改为引用 `ui_style.SUCCESS / WARNING / DANGER`，托盘图标和主窗口状态色完全一致；菜单仅挂 `MENU_QSS`，避免把表单/按钮样式带到托盘菜单。
+3. `profile_manager.py` —
+   - 删除从未被调用的 `delete_profile()`（dead code）。
+   - `load_config()` 首次启动只创建默认配置并标 `first_run_pending=True`，不再同步调用 PowerShell；启动延迟由原来的 1-3 秒降为零。
+   - 新增 `detect_and_import_current_static()`（仅只读检测和构造 profile，可在后台线程调用）、`add_imported_profile()`（追加到 config 并视情况设为激活）、`clear_first_run_pending()`。
+   - 同时去掉了原 `_detect_and_save_current_config` 中对 `get_gateway()` 的冗余调用（`get_current_ip_config` 已经包含 gateway）。
+4. `network_controller.py` —
+   - `get_current_ip_config()` 由 4 次串行 `_run_ps()` 改为 1 次 PowerShell + `ConvertTo-Json`，apply 流程节省 ~600ms。
+   - `_wait_for_profile_to_settle()` 接受 `old_config` 参数。DHCP 路径不再只看 "有 default adapter IP" 立刻 return，要么 IP 已变化、要么 `Get-NetIPInterface.Dhcp` 状态确认 Enabled，避免切 DHCP 时旧静态 IP 仍在线导致的过早 settle / ping 旧网关误报 success。
+   - `apply_profile` 调用 settle 时传入 `old_config`。
+5. `edit_dialog.py` — 新建 `_grow_to_fit()`：替换 `_on_ip_mode_changed` / `_on_dns_mode_changed` / `_on_mask_changed` 中的 `adjustSize()`，弹窗只增高、不再因来回切换字段而上下抖动。
+6. `main_window.py` —
+   - `ProfileCard` 新增 `delete_requested` 信号；右键菜单删除走信号，移除原来 `_on_delete()` 沿 `parent()` 链向上找 `MainWindow` 的脆弱实现，`_load_cards` 改为统一信号连接。
+   - 标题栏关闭按钮 `btn_close` 移除冗余的内联 `setStyleSheet`，改为依赖父级 stylesheet 的 `#titleClose` 选择器；同时给父级 stylesheet 补充 `QPushButton#titleClose` 基础样式（`border: none; background: transparent; font-size: 14px;`）。
+   - `set_network_status` 颜色映射改为引用 `ui_style.SUCCESS / WARNING / DANGER`，状态栏 dot 与托盘图标的 normal / warning / error 完全一致。
+   - 新增 `apply_failed` 信号；`_on_apply_finished` 的 FAILED 分支会立即把状态栏 dot 置为 error，并通过信号通知主程序刷新托盘和重新检测网络（与托盘入口失败处理对齐）。
+   - `_restore_position` 由"只校验左上角点在屏内"改为"标题栏整宽 × 36px 都在屏内"，避免上次保存位置贴右边时窗口大半飘出屏幕。
+7. `main.py` —
+   - `show_main_window` 用 `showNormal()` 取代 `show()`，修复"先最小化、再点 X 关到托盘后，下次点托盘图标主窗口仍以最小化状态出现"的卡死感。
+   - `_try_bring_existing_window` 由 `if target_title in buf.value` 改为 `if buf.value == target_title`，避免 IDE 编辑源码、浏览器仓库页等含 `NetSwitch` 字样窗口被误识别为已有实例。
+   - 新增 `_FirstDetectWorker` 后台线程；`__init__` 检测到 `first_run_pending` 时启动该 worker，完成后再走开机恢复 / 状态检测流程。托盘图标首次启动可立即出现。
+   - 新增 `_on_main_window_apply_failed` 处理 `MainWindow.apply_failed` 信号：托盘 `update_status("error")` + 触发 `_check_network_status`。
+8. `project-log/05-current-status.md`、`project-log/06-dev-log.md` — 同步更新本轮 14 项修复范围、验证方式和遗留事项。
+
+**遇到的问题**：
+- `MainWindow` 通过 `hide()` 关闭到托盘时，`Qt.WindowMinimized` 状态不会被清除；后续 `show()` 会以最小化状态出现。已在 offscreen Qt 测试中复现并验证 `showNormal()` 修复。
+- `keyPressEvent` 的 monkey-patch 在 PyQt6 中是否生效曾被怀疑：实测 PyQt6 对实例属性赋值方式的事件覆盖支持良好，无须改造。
+- `WA_TranslucentBackground=False` + `mainContainer` 8px 圆角实测下角落仅有 5-10 灰度差异，肉眼几乎看不出，本轮不动这块；未来如果改造液态玻璃质感再统一处理。
+- `tray.py` 首次启动时托盘菜单挂全表单 QSS 在 QMenu 内不会渲染按钮/输入框等，副作用有限，但仍按用户要求抽出独立 `MENU_QSS` 以表达意图。
+
+**解决方式**：
+- 启动期网络检测改为后台线程，先把托盘画出来再异步补 profile；如果用户在检测期间已经手动切换过方案，新检测出的方案只追加不抢占激活。
+- DHCP settle 通过 IP 变化和 `Get-NetIPInterface.Dhcp` 双重确认，避免被旧静态 IP 蒙蔽。
+- 主窗口失败路径的状态同步通过新信号 `apply_failed` 暴露给主程序，沿用与托盘成功 / 失败一致的处理路径。
+- 单实例标题严格相等比子串匹配更安全；如果未来出现多个标题恰好同名的窗口（极罕见），可以再升级到 PID + 进程名校验。
+
+**验证方式**：
+- 运行 `uv run python -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py ui_style.py scripts/build.py scripts/generate_icon.py`。
+- 使用临时 `APPDATA` + `QT_QPA_PLATFORM=offscreen` 实例化 `MainWindow`、`ProfileCard`、`EditDialog`、`SettingsDialog`、`TrayIcon`，验证：
+  - `profile_manager.delete_profile` 已删除，`detect_and_import_current_static` / `add_imported_profile` / `clear_first_run_pending` 已新增；
+  - `MainWindow.apply_failed`、`ProfileCard.delete_requested`、`EditDialog._grow_to_fit` 都存在；
+  - `ui_style.MENU_QSS` 存在、`ui_style.WARNING == #D97706`；
+  - `_wait_for_profile_to_settle` 签名包含 `old_config` 参数；
+  - `load_config()` 首次启动产出 `first_run_pending=True`，profiles 仅有默认 1 项。
+- 渲染测试确认 hide() 后再 show()/raise/activateWindow() 仍保留 `WindowMinimized`，验证修复必要性；改成 `showNormal()` 后清除最小化状态。
+
+**验证结果**：
+- 静态编译通过。
+- 实例化 / 信号 / API 检查通过。
+- 未执行真实 DHCP / 静态 IP 切换，原因：会修改本机网络配置，且测试机为 macOS 无 PowerShell。
+- 未执行完整 PyInstaller / Inno Setup 构建。
+- 未在真实 Windows 桌面验证液态玻璃观感、DHCP settle 修复在慢速 DHCP 服务器上的实际行为、首次启动后台导入的端到端体验——这些需要在真实 Windows 管理员环境下实机回归。
+
+**本地产物清理**：
+- 已清理 `__pycache__/`、`scripts/__pycache__/` 和临时 UI 截图、临时 `APPDATA`。
+
+---
+
 ## 2026-06-18（统一液态玻璃风格界面）
 
 **触发原因**：用户反馈前端界面太丑，特别是新建方案页面，希望改成简洁优雅、苹果风格、克制的液态玻璃界面，并统一所有页面风格。
