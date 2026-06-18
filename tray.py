@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor, QFont
 from PyQt6.QtCore import Qt, pyqtSignal
 
+import ui_style
+
 # 图标背景色映射
 _ICON_COLORS = {
     "normal":    QColor(0x0E, 0x74, 0x90),   # 深青色
@@ -76,6 +78,7 @@ class TrayIcon(QSystemTrayIcon):
 
     def _build_menu(self):
         self.menu = QMenu()
+        self.menu.setStyleSheet(ui_style.COMMON_QSS)
         self.menu.aboutToShow.connect(self.refresh_status_requested.emit)
         self.setContextMenu(self.menu)
 

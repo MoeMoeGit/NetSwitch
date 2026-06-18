@@ -5,8 +5,10 @@ from PyQt6.QtWidgets import (
     QGroupBox, QFormLayout, QFrame,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtGui import QFont
 
 import profile_manager
+import ui_style
 
 
 class SettingsDialog(QDialog):
@@ -23,19 +25,29 @@ class SettingsDialog(QDialog):
         self.version = version or "0.0.0"
 
         self.setWindowTitle("设置")
-        self.setFixedWidth(340)
+        self.setFixedWidth(380)
         self.setWindowFlags(
             self.windowFlags()
             & ~Qt.WindowType.WindowContextHelpButtonHint
         )
+        ui_style.apply_common_style(self)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+        layout.setContentsMargins(18, 16, 18, 16)
+
+        title = QLabel("设置")
+        title.setFont(QFont("Microsoft YaHei UI", 17, QFont.Weight.DemiBold))
+        layout.addWidget(title)
+
+        subtitle = QLabel("管理启动行为、更新和反馈入口。")
+        subtitle.setProperty("muted", True)
+        layout.addWidget(subtitle)
 
         general_box = QGroupBox("常规")
         general_layout = QVBoxLayout(general_box)
-        general_layout.setSpacing(8)
+        general_layout.setContentsMargins(12, 16, 12, 12)
+        general_layout.setSpacing(10)
         self.chk_startup = QCheckBox("开机自启")
         self.chk_startup.setChecked(
             profile_manager.get_start_with_windows(self.config)
@@ -52,33 +64,40 @@ class SettingsDialog(QDialog):
 
         update_box = QGroupBox("更新")
         update_layout = QFormLayout(update_box)
+        update_layout.setContentsMargins(12, 16, 12, 12)
         update_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         update_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        update_layout.setHorizontalSpacing(10)
-        update_layout.setVerticalSpacing(8)
+        update_layout.setHorizontalSpacing(14)
+        update_layout.setVerticalSpacing(10)
 
         self.lbl_version = QLabel(self.version)
         self.lbl_version.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_version.setProperty("muted", True)
         update_layout.addRow("当前版本", self.lbl_version)
 
         self.btn_check_update = QPushButton("检查更新")
+        self.btn_check_update.setObjectName("primaryButton")
         self.btn_check_update.clicked.connect(self.check_update_requested.emit)
         update_layout.addRow("", self.btn_check_update)
         layout.addWidget(update_box)
 
         help_box = QGroupBox("帮助与反馈")
         help_layout = QVBoxLayout(help_box)
-        help_layout.setSpacing(8)
+        help_layout.setContentsMargins(12, 16, 12, 12)
+        help_layout.setSpacing(10)
 
         self.lbl_author = QLabel("作者：Lucas Liu")
         self.lbl_author.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_author.setProperty("muted", True)
         help_layout.addWidget(self.lbl_author)
 
         self.lbl_email = QLabel("邮箱：lucas6.zju@vip.163.com")
         self.lbl_email.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_email.setProperty("muted", True)
         help_layout.addWidget(self.lbl_email)
 
         link_row = QHBoxLayout()
+        link_row.setSpacing(8)
         self.btn_homepage = QPushButton("GitHub 主页")
         self.btn_homepage.clicked.connect(self.open_homepage_requested.emit)
         link_row.addWidget(self.btn_homepage)
@@ -92,6 +111,7 @@ class SettingsDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_close = QPushButton("关闭")
+        btn_close.setObjectName("textButton")
         btn_close.clicked.connect(self.accept)
         btn_layout.addWidget(btn_close)
         layout.addLayout(btn_layout)

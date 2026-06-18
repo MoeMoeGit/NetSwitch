@@ -17,22 +17,23 @@ from PyQt6.QtGui import (
 import profile_manager
 import network_controller
 from edit_dialog import EditDialog
+import ui_style
 
 
 # ── 颜色常量 ──
-COLOR_BG = "#FFFFFF"
-COLOR_BG_SECONDARY = "#F5F5F5"
-COLOR_BORDER = "#E0E0E0"
-COLOR_TEXT = "#1A1A1A"
-COLOR_TEXT_SECONDARY = "#888888"
-COLOR_GREEN = "#16A34A"
-COLOR_GREEN_BG = "#DCFCE7"
-COLOR_GREEN_TEXT = "#15803D"
-COLOR_BLUE_BG = "#E6F1FB"
-COLOR_BLUE_BORDER = "#B5D4F4"
-COLOR_BLUE_BTN = "#185FA5"
-COLOR_RED_TEXT = "#A32D2D"
-COLOR_RED_HOVER = "#C42B1C"
+COLOR_BG = ui_style.SURFACE_STRONG
+COLOR_BG_SECONDARY = ui_style.SURFACE_SOFT
+COLOR_BORDER = ui_style.BORDER
+COLOR_TEXT = ui_style.TEXT
+COLOR_TEXT_SECONDARY = ui_style.TEXT_SECONDARY
+COLOR_GREEN = ui_style.SUCCESS
+COLOR_GREEN_BG = ui_style.SUCCESS_SOFT
+COLOR_GREEN_TEXT = "#1E7A3A"
+COLOR_BLUE_BG = ui_style.ACCENT_SOFT
+COLOR_BLUE_BORDER = ui_style.BORDER_FOCUS
+COLOR_BLUE_BTN = ui_style.ACCENT
+COLOR_RED_TEXT = ui_style.DANGER
+COLOR_RED_HOVER = ui_style.DANGER
 
 
 # ── 后台线程：执行方案切换 ──
@@ -120,9 +121,10 @@ class ProfileCard(QWidget):
             return
         name = self.profile.get("name", "")
         self._rename_edit = QLineEdit(name, self)
-        self._rename_edit.setFont(QFont("Microsoft YaHei", 13, QFont.Weight.Medium))
+        self._rename_edit.setFont(QFont("Microsoft YaHei UI", 13, QFont.Weight.Medium))
         self._rename_edit.setStyleSheet(
-            "border: 1px solid #185FA5; border-radius: 3px; padding: 2px 4px; background: white;"
+            f"border: 1px solid {ui_style.BORDER_FOCUS}; border-radius: 8px; "
+            "padding: 2px 8px; background: white;"
         )
         # 计算名称区域位置
         left = 16 + (8 if self._is_active else 0)
@@ -165,7 +167,7 @@ class ProfileCard(QWidget):
             bg = QColor(COLOR_BLUE_BG)
             border = QColor(COLOR_BLUE_BORDER)
         else:
-            bg = QColor(COLOR_BG)
+            bg = QColor(255, 255, 255, 232)
             border = QColor(COLOR_BORDER)
 
         path = QPainterPath()
@@ -185,13 +187,13 @@ class ProfileCard(QWidget):
         # 名称
         if not self._rename_edit:
             name = self.profile.get("name", "")
-            painter.setFont(QFont("Microsoft YaHei", 13, QFont.Weight.Medium))
+            painter.setFont(QFont("Microsoft YaHei UI", 13, QFont.Weight.Medium))
             painter.setPen(QColor(COLOR_TEXT))
             painter.drawText(content_left, 10, w - content_left - 80, 24,
                              Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
 
         # 副文本
-        painter.setFont(QFont("Microsoft YaHei", 11))
+        painter.setFont(QFont("Microsoft YaHei UI", 11))
         painter.setPen(QColor(COLOR_TEXT_SECONDARY))
         if self._result_text:
             sub = self._result_text
@@ -220,14 +222,14 @@ class ProfileCard(QWidget):
         # 激活中标签
         if self._is_active and not self._result_text:
             tag_text = "激活中"
-            tag_font = QFont("Microsoft YaHei", 10)
+            tag_font = QFont("Microsoft YaHei UI", 10)
             painter.setFont(tag_font)
             tag_w = painter.fontMetrics().horizontalAdvance(tag_text) + 14
             tag_h = 20
             tag_x = w - tag_w - 12
             tag_y = (h - tag_h) // 2
             tag_path = QPainterPath()
-            tag_path.addRoundedRect(tag_x, tag_y, tag_w, tag_h, 10, 10)
+            tag_path.addRoundedRect(tag_x, tag_y, tag_w, tag_h, 8, 8)
             painter.fillPath(tag_path, QColor(COLOR_GREEN_BG))
             painter.setPen(QColor(COLOR_GREEN_TEXT))
             painter.drawText(tag_x, tag_y, tag_w, tag_h,
@@ -334,6 +336,44 @@ class MainWindow(QWidget):
         }
 
     def _build_ui(self):
+        self.setStyleSheet(
+            ui_style.COMMON_QSS
+            + f"""
+            QWidget#mainContainer {{
+                background: {ui_style.WINDOW_BG};
+                border: 1px solid {ui_style.BORDER};
+                border-radius: 8px;
+            }}
+            QWidget#titleBar {{
+                background: rgba(255, 255, 255, 218);
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }}
+            QWidget#statusBar,
+            QWidget#bottomBar {{
+                background: rgba(255, 255, 255, 190);
+            }}
+            QWidget#cardContainer {{
+                background: transparent;
+            }}
+            QPushButton#titleButton {{
+                border: none;
+                background: transparent;
+                min-height: 32px;
+                border-radius: 0;
+                color: {ui_style.TEXT_SECONDARY};
+                font-size: 13px;
+            }}
+            QPushButton#titleButton:hover {{
+                background: rgba(10, 132, 255, 22);
+                color: {ui_style.TEXT};
+            }}
+            QPushButton#titleClose:hover {{
+                background: {ui_style.DANGER};
+                color: white;
+            }}
+            """
+        )
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -341,9 +381,6 @@ class MainWindow(QWidget):
         # 外层容器（圆角 + 边框）
         self._container = QWidget()
         self._container.setObjectName("mainContainer")
-        self._container.setStyleSheet(
-            "#mainContainer { background: white; border: 1px solid #ddd; border-radius: 8px; }"
-        )
         root.addWidget(self._container)
 
         vbox = QVBoxLayout(self._container)
@@ -352,27 +389,25 @@ class MainWindow(QWidget):
 
         # ── 标题栏 ──
         title_bar = QWidget()
+        title_bar.setObjectName("titleBar")
         title_bar.setFixedHeight(36)
-        title_bar.setStyleSheet(f"background: {COLOR_BG_SECONDARY}; border-top-left-radius: 8px; border-top-right-radius: 8px;")
         tb_layout = QHBoxLayout(title_bar)
         tb_layout.setContentsMargins(12, 0, 0, 0)
 
         title_label = QLabel("NetSwitch")
-        title_label.setFont(QFont("Microsoft YaHei", 13, QFont.Weight.Medium))
+        title_label.setFont(QFont("Microsoft YaHei UI", 13, QFont.Weight.DemiBold))
         title_label.setStyleSheet(f"color: {COLOR_TEXT};")
         tb_layout.addWidget(title_label)
         tb_layout.addStretch()
 
         btn_min = QPushButton("─")
+        btn_min.setObjectName("titleButton")
         btn_min.setFixedSize(46, 36)
-        btn_min.setStyleSheet(
-            "QPushButton { border: none; font-size: 14px; }"
-            "QPushButton:hover { background: #e0e0e0; }"
-        )
         btn_min.clicked.connect(self.showMinimized)
         tb_layout.addWidget(btn_min)
 
         btn_close = QPushButton("✕")
+        btn_close.setObjectName("titleClose")
         btn_close.setFixedSize(46, 36)
         btn_close.setStyleSheet(
             "QPushButton { border: none; font-size: 14px; }"
@@ -386,8 +421,8 @@ class MainWindow(QWidget):
 
         # ── 状态栏 ──
         status_bar = QWidget()
+        status_bar.setObjectName("statusBar")
         status_bar.setFixedHeight(32)
-        status_bar.setStyleSheet(f"background: {COLOR_BG_SECONDARY};")
         sb_layout = QHBoxLayout(status_bar)
         sb_layout.setContentsMargins(12, 0, 12, 0)
 
@@ -397,7 +432,7 @@ class MainWindow(QWidget):
         sb_layout.addWidget(self._status_dot)
 
         self._status_label = QLabel("当前 —  检测中…")
-        self._status_label.setFont(QFont("Microsoft YaHei", 12))
+        self._status_label.setFont(QFont("Microsoft YaHei UI", 12))
         self._status_label.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
         sb_layout.addWidget(self._status_label)
         sb_layout.addStretch()
@@ -409,10 +444,9 @@ class MainWindow(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._scroll.setStyleSheet("QScrollArea { border: none; }")
 
         self._card_container = QWidget()
-        self._card_container.setStyleSheet("background: white;")
+        self._card_container.setObjectName("cardContainer")
         self._card_layout = QVBoxLayout(self._card_container)
         self._card_layout.setContentsMargins(10, 10, 10, 6)
         self._card_layout.setSpacing(6)
@@ -425,28 +459,17 @@ class MainWindow(QWidget):
         vbox.addWidget(self._make_separator())
 
         bottom = QWidget()
+        bottom.setObjectName("bottomBar")
         bottom.setFixedHeight(44)
         bot_layout = QHBoxLayout(bottom)
         bot_layout.setContentsMargins(10, 0, 10, 0)
 
         self.btn_new = QPushButton("新建")
-        self.btn_new.setStyleSheet(
-            f"QPushButton {{ border: 1px solid {COLOR_BORDER}; border-radius: 4px; "
-            f"padding: 6px 14px; font-size: 12px; color: {COLOR_TEXT}; "
-            f"background: {COLOR_BG_SECONDARY}; }}"
-            "QPushButton:hover { background: #ededed; }"
-        )
         self.btn_new.clicked.connect(self._on_new)
         bot_layout.addWidget(self.btn_new)
 
         self.btn_delete = QPushButton("删除")
-        self.btn_delete.setStyleSheet(
-            f"QPushButton {{ border: 1px solid #e8d5d5; border-radius: 4px; "
-            f"padding: 6px 14px; font-size: 12px; color: {COLOR_RED_TEXT}; "
-            "background: #FFF5F5; }"
-            "QPushButton:hover { background: #FDE8E8; }"
-            "QPushButton:disabled { color: #B8B8B8; border-color: #EEE; background: #FAFAFA; }"
-        )
+        self.btn_delete.setObjectName("dangerButton")
         self.btn_delete.clicked.connect(self._on_delete_click)
         self.btn_delete.setEnabled(False)
         bot_layout.addWidget(self.btn_delete)
@@ -454,12 +477,7 @@ class MainWindow(QWidget):
         bot_layout.addStretch()
 
         self.btn_activate = QPushButton("激活")
-        self.btn_activate.setStyleSheet(
-            f"QPushButton {{ background: {COLOR_BLUE_BTN}; color: white; font-weight: 500; "
-            f"padding: 6px 20px; border-radius: 4px; font-size: 12px; }}"
-            "QPushButton:hover { background: #1a6fa0; }"
-            "QPushButton:disabled { background: #ccc; color: #666; }"
-        )
+        self.btn_activate.setObjectName("primaryButton")
         self.btn_activate.clicked.connect(self._on_activate)
         self.btn_activate.setEnabled(False)
         bot_layout.addWidget(self.btn_activate)

@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 import network_controller
+import ui_style
 
 
 class EditDialog(QDialog):
@@ -23,52 +24,64 @@ class EditDialog(QDialog):
         self.is_locked = profile and profile.get("locked", False)
         self.saved = False
 
-        self.setWindowTitle("方案详情" if self.is_locked else ("编辑方案" if profile else "新建方案"))
-        self.setFixedWidth(360)
+        title = "方案详情" if self.is_locked else ("编辑方案" if profile else "新建方案")
+        self.setWindowTitle(title)
+        self.setFixedWidth(420)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        ui_style.apply_common_style(self)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
 
-        # 方案名称
+        header = QLabel(title)
+        header.setFont(QFont("Microsoft YaHei UI", 17, QFont.Weight.DemiBold))
+        layout.addWidget(header)
+
+        subtitle = QLabel("配置当前优先网卡的 IP、网关和 DNS。")
+        subtitle.setProperty("muted", True)
+        layout.addWidget(subtitle)
+
+        # 基础信息
+        profile_box = QGroupBox("基础信息")
+        profile_form = self._make_form(profile_box)
+
         self.edit_name = QLineEdit()
-        self.edit_name.setPlaceholderText("输入方案名称")
-        layout.addWidget(self._label("方案名称"))
-        layout.addWidget(self.edit_name)
+        self.edit_name.setPlaceholderText("例如：公司网络 / 家庭软路由")
+        self.edit_name.textChanged.connect(self._validate)
+        profile_form.addRow("方案名称", self.edit_name)
 
-        # 备注
         self.edit_remark = QLineEdit()
-        self.edit_remark.setPlaceholderText("备注（可选）")
-        layout.addWidget(self._label("备注"))
-        layout.addWidget(self.edit_remark)
+        self.edit_remark.setPlaceholderText("备注，可选")
+        profile_form.addRow("备注", self.edit_remark)
+        layout.addWidget(profile_box)
 
-        # 分割线
-        layout.addWidget(self._separator())
+        # IP 配置
+        ip_box = QGroupBox("IP 配置")
+        ip_layout = QVBoxLayout(ip_box)
+        ip_layout.setContentsMargins(12, 16, 12, 12)
+        ip_layout.setSpacing(10)
 
-        # IP 模式
-        layout.addWidget(self._label("IP 模式"))
         ip_mode_layout = QHBoxLayout()
-        self.radio_dhcp = QRadioButton("DHCP")
-        self.radio_static = QRadioButton("手动")
+        ip_mode_layout.setSpacing(18)
+        self.radio_dhcp = QRadioButton("DHCP 自动获取")
+        self.radio_static = QRadioButton("手动指定")
         self.ip_mode_group = QButtonGroup()
         self.ip_mode_group.addButton(self.radio_dhcp)
         self.ip_mode_group.addButton(self.radio_static)
         self.radio_dhcp.toggled.connect(self._on_ip_mode_changed)
         ip_mode_layout.addWidget(self.radio_dhcp)
         ip_mode_layout.addWidget(self.radio_static)
-        layout.addLayout(ip_mode_layout)
+        ip_mode_layout.addStretch()
+        ip_layout.addLayout(ip_mode_layout)
 
-        # 手动 IP 字段容器
         self.ip_fields_widget = QFrame()
-        ip_fields_layout = QVBoxLayout(self.ip_fields_widget)
-        ip_fields_layout.setContentsMargins(0, 0, 0, 0)
-        ip_fields_layout.setSpacing(6)
+        ip_form = self._make_form(self.ip_fields_widget)
 
         self.edit_ip = QLineEdit()
         self.edit_ip.setPlaceholderText("192.168.1.100")
         self.edit_ip.textChanged.connect(self._validate)
-        ip_fields_layout.addWidget(self._label("IP 地址"))
-        ip_fields_layout.addWidget(self.edit_ip)
+        ip_form.addRow("IP 地址", self.edit_ip)
 
         self.combo_mask = QComboBox()
         self.combo_mask.addItems([
@@ -77,32 +90,31 @@ class EditDialog(QDialog):
             "/8 - 255.0.0.0",
             "自定义",
         ])
+        self.combo_mask.currentIndexChanged.connect(self._on_mask_changed)
+        ip_form.addRow("子网掩码", self.combo_mask)
+
         self.edit_mask_custom = QLineEdit()
         self.edit_mask_custom.setPlaceholderText("255.255.255.0")
         self.edit_mask_custom.setVisible(False)
         self.edit_mask_custom.textChanged.connect(self._validate)
-        self.combo_mask.currentIndexChanged.connect(self._on_mask_changed)
-        mask_layout = QVBoxLayout()
-        mask_layout.setSpacing(2)
-        mask_layout.addWidget(self.combo_mask)
-        mask_layout.addWidget(self.edit_mask_custom)
-        ip_fields_layout.addWidget(self._label("子网掩码"))
-        ip_fields_layout.addLayout(mask_layout)
+        ip_form.addRow("", self.edit_mask_custom)
 
         self.edit_gateway = QLineEdit()
         self.edit_gateway.setPlaceholderText("192.168.1.1")
         self.edit_gateway.textChanged.connect(self._validate)
-        ip_fields_layout.addWidget(self._label("默认网关"))
-        ip_fields_layout.addWidget(self.edit_gateway)
+        ip_form.addRow("默认网关", self.edit_gateway)
 
-        layout.addWidget(self.ip_fields_widget)
+        ip_layout.addWidget(self.ip_fields_widget)
+        layout.addWidget(ip_box)
 
-        # 分割线
-        layout.addWidget(self._separator())
+        # DNS 配置
+        dns_box = QGroupBox("DNS 配置")
+        dns_layout = QVBoxLayout(dns_box)
+        dns_layout.setContentsMargins(12, 16, 12, 12)
+        dns_layout.setSpacing(10)
 
-        # DNS 模式
-        layout.addWidget(self._label("DNS 模式"))
         dns_mode_layout = QHBoxLayout()
+        dns_mode_layout.setSpacing(18)
         self.radio_dns_auto = QRadioButton("自动获取")
         self.radio_dns_manual = QRadioButton("手动指定")
         self.dns_mode_group = QButtonGroup()
@@ -111,91 +123,88 @@ class EditDialog(QDialog):
         self.radio_dns_auto.toggled.connect(self._on_dns_mode_changed)
         dns_mode_layout.addWidget(self.radio_dns_auto)
         dns_mode_layout.addWidget(self.radio_dns_manual)
-        layout.addLayout(dns_mode_layout)
+        dns_mode_layout.addStretch()
+        dns_layout.addLayout(dns_mode_layout)
 
-        # 手动 DNS 字段容器
         self.dns_fields_widget = QFrame()
-        dns_fields_layout = QVBoxLayout(self.dns_fields_widget)
-        dns_fields_layout.setContentsMargins(0, 0, 0, 0)
-        dns_fields_layout.setSpacing(6)
+        dns_form = self._make_form(self.dns_fields_widget)
 
         self.edit_dns_primary = QLineEdit()
         self.edit_dns_primary.setPlaceholderText("8.8.8.8")
         self.edit_dns_primary.textChanged.connect(self._validate)
-        dns_fields_layout.addWidget(self._label("首选 DNS"))
-        dns_fields_layout.addWidget(self.edit_dns_primary)
+        dns_form.addRow("首选 DNS", self.edit_dns_primary)
 
         self.edit_dns_secondary = QLineEdit()
-        self.edit_dns_secondary.setPlaceholderText("8.8.4.4（可选）")
+        self.edit_dns_secondary.setPlaceholderText("8.8.4.4，可选")
         self.edit_dns_secondary.textChanged.connect(self._validate)
-        dns_fields_layout.addWidget(self._label("备用 DNS"))
-        dns_fields_layout.addWidget(self.edit_dns_secondary)
+        dns_form.addRow("备用 DNS", self.edit_dns_secondary)
 
-        layout.addWidget(self.dns_fields_widget)
-
-        # 分割线
-        layout.addWidget(self._separator())
+        dns_layout.addWidget(self.dns_fields_widget)
+        layout.addWidget(dns_box)
 
         # 底部按钮
         btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(0, 2, 0, 0)
         btn_layout.addStretch()
 
         if self.is_locked:
             btn_close = QPushButton("关闭")
+            btn_close.setObjectName("primaryButton")
             btn_close.clicked.connect(self.close)
             btn_layout.addWidget(btn_close)
         else:
             self.btn_cancel = QPushButton("取消")
+            self.btn_cancel.setObjectName("textButton")
             self.btn_cancel.clicked.connect(self.close)
             btn_layout.addWidget(self.btn_cancel)
 
             self.btn_save = QPushButton("保存")
-            self.btn_save.setStyleSheet(
-                "QPushButton { background-color: #185FA5; color: white; padding: 6px 20px; }"
-                "QPushButton:disabled { background-color: #ccc; color: #666; }"
-            )
+            self.btn_save.setObjectName("primaryButton")
             self.btn_save.clicked.connect(self._on_save)
             btn_layout.addWidget(self.btn_save)
 
         layout.addLayout(btn_layout)
 
-        # 填充数据
         if profile:
             self._load_profile(profile)
         else:
             self.radio_dhcp.setChecked(True)
             self.radio_dns_auto.setChecked(True)
 
-        # 只读模式
         if self.is_locked:
             self._set_read_only()
 
         self._validate()
+        self.adjustSize()
 
-    def _label(self, text):
-        lbl = QLabel(text)
-        lbl.setStyleSheet("font-size: 12px; color: #333;")
-        return lbl
+    def _make_form(self, parent):
+        form = QFormLayout(parent)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(9)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        return form
 
-    def _separator(self):
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet("color: #ddd;")
-        return line
+    def _set_invalid(self, widget, invalid):
+        widget.setProperty("invalid", invalid)
+        ui_style.polish(widget)
 
     def _on_ip_mode_changed(self):
         is_static = self.radio_static.isChecked()
         self.ip_fields_widget.setVisible(is_static)
+        self.adjustSize()
         self._validate()
 
     def _on_dns_mode_changed(self):
         is_manual = self.radio_dns_manual.isChecked()
         self.dns_fields_widget.setVisible(is_manual)
+        self.adjustSize()
         self._validate()
 
     def _on_mask_changed(self, index):
         self.edit_mask_custom.setVisible(index == 3)
+        self.adjustSize()
         self._validate()
 
     def _validate(self):
@@ -204,44 +213,44 @@ class EditDialog(QDialog):
 
         valid = True
 
-        if not self.edit_name.text().strip():
+        name_text = self.edit_name.text()
+        name_missing = not name_text.strip()
+        self._set_invalid(self.edit_name, bool(name_text) and name_missing)
+        if name_missing:
             valid = False
 
+        for widget in (
+            self.edit_ip,
+            self.edit_mask_custom,
+            self.edit_gateway,
+            self.edit_dns_primary,
+            self.edit_dns_secondary,
+        ):
+            self._set_invalid(widget, False)
+
         if self.radio_static.isChecked():
-            if not network_controller.validate_ipv4(self.edit_ip.text()):
-                self.edit_ip.setStyleSheet("border: 1px solid red;")
-                valid = False
-            else:
-                self.edit_ip.setStyleSheet("")
+            ip_text = self.edit_ip.text().strip()
+            gateway_text = self.edit_gateway.text().strip()
+            ip_invalid = not network_controller.validate_ipv4(ip_text)
+            gateway_invalid = not network_controller.validate_ipv4(gateway_text)
+            self._set_invalid(self.edit_ip, bool(ip_text) and ip_invalid)
+            self._set_invalid(self.edit_gateway, bool(gateway_text) and gateway_invalid)
+            valid = valid and not ip_invalid and not gateway_invalid
 
             if self.combo_mask.currentIndex() == 3:
-                if not network_controller.validate_subnet_mask(self.edit_mask_custom.text()):
-                    self.edit_mask_custom.setStyleSheet("border: 1px solid red;")
-                    valid = False
-                else:
-                    self.edit_mask_custom.setStyleSheet("")
-
-            if not network_controller.validate_ipv4(self.edit_gateway.text()):
-                self.edit_gateway.setStyleSheet("border: 1px solid red;")
-                valid = False
-            else:
-                self.edit_gateway.setStyleSheet("")
+                mask_text = self.edit_mask_custom.text().strip()
+                mask_invalid = not network_controller.validate_subnet_mask(mask_text)
+                self._set_invalid(self.edit_mask_custom, bool(mask_text) and mask_invalid)
+                valid = valid and not mask_invalid
 
         if self.radio_dns_manual.isChecked():
-            if not network_controller.validate_ipv4(self.edit_dns_primary.text()):
-                self.edit_dns_primary.setStyleSheet("border: 1px solid red;")
-                valid = False
-            else:
-                self.edit_dns_primary.setStyleSheet("")
-
-            if self.edit_dns_secondary.text().strip():
-                if not network_controller.validate_ipv4(self.edit_dns_secondary.text()):
-                    self.edit_dns_secondary.setStyleSheet("border: 1px solid red;")
-                    valid = False
-                else:
-                    self.edit_dns_secondary.setStyleSheet("")
-            else:
-                self.edit_dns_secondary.setStyleSheet("")
+            primary_text = self.edit_dns_primary.text().strip()
+            primary_invalid = not network_controller.validate_ipv4(primary_text)
+            secondary_text = self.edit_dns_secondary.text().strip()
+            secondary_invalid = bool(secondary_text) and not network_controller.validate_ipv4(secondary_text)
+            self._set_invalid(self.edit_dns_primary, bool(primary_text) and primary_invalid)
+            self._set_invalid(self.edit_dns_secondary, secondary_invalid)
+            valid = valid and not primary_invalid and not secondary_invalid
 
         self.btn_save.setEnabled(valid)
 

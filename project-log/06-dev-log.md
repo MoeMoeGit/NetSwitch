@@ -2,6 +2,40 @@
 
 ---
 
+## 2026-06-18（统一液态玻璃风格界面）
+
+**触发原因**：用户反馈前端界面太丑，特别是新建方案页面，希望改成简洁优雅、苹果风格、克制的液态玻璃界面，并统一所有页面风格。
+
+**修改内容**：
+1. `ui_style.py` — 新增共享视觉样式模块，统一字体、浅色背景、半透明白色表面、细边框、主按钮 / 危险按钮 / 文本按钮、输入框、下拉框、菜单和分组样式。
+2. `edit_dialog.py` — 重做新建 / 编辑 / 查看方案弹窗，改为顶部标题、基础信息、IP 配置、DNS 配置、底部操作区的清晰分区；保留原有字段校验和保存数据结构。
+3. `main_window.py` — 主窗口接入共享样式，统一卡片、标题栏、状态栏和底部按钮的浅色玻璃质感；保留原窗口尺寸、快捷键、激活和删除逻辑。
+4. `settings_dialog.py` — 设置页接入共享样式，统一常规、更新、帮助与反馈区块的间距、按钮和文字层级。
+5. `tray.py` — 托盘右键菜单接入共享菜单样式，使桌面入口和主窗口风格一致。
+6. `project-log/05-current-status.md`、`project-log/06-dev-log.md` — 记录本轮 UI 改造范围、验证方式和剩余确认项。
+
+**遇到的问题**：
+- 第一次组件实例化验证时使用了真实 `%AppData%`，关闭测试主窗口触发了原有窗口位置保存逻辑，导致真实 `profiles.json` 被示例配置覆盖。
+- 当前 `QT_QPA_PLATFORM=offscreen` 验证环境中 Qt 字体库为空，自动截图中文字渲染为方块，不能作为最终字体观感依据。
+
+**解决方式**：
+- 立即用只读网络检测重建真实配置为“默认 DHCP + 当前系统静态配置”，去掉测试示例方案；后续 UI 实例化验证统一改用临时 `APPDATA`。
+- 截图只用于检查布局、间距和色块，不作为文字渲染验收；最终字体效果需要在真实 Windows 桌面环境查看。
+
+**验证方式**：
+- 运行 `python -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py scripts\build.py scripts\generate_icon.py ui_style.py`。
+- 使用临时 `APPDATA` 和 `QT_QPA_PLATFORM=offscreen` 实例化 `MainWindow`、`EditDialog`、`SettingsDialog`，确认组件可创建且不触发网络写入。
+- 运行 `git diff --check` 检查行尾空格等格式问题。
+
+**验证结果**：
+- 静态编译通过。
+- 组件实例化通过。
+- 未执行真实 DHCP / 静态 IP 切换，原因是会修改本机网络配置。
+- 未执行完整 PyInstaller / Inno Setup 构建。
+
+**本地产物清理**：
+- 已清理本轮产生的 `__pycache__/`、`scripts/__pycache__/` 和临时 UI 截图 / 临时 `APPDATA` 目录。
+
 ## 2026-05-25（更新安装包完整性校验）
 
 **触发原因**：用户确认优化更新流程，希望保留软件内更新入口，但把“直接下载并运行外部安装器”的安全风险补上。
