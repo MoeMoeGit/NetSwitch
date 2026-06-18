@@ -2,6 +2,33 @@
 
 ---
 
+## 2026-06-19（v1.5.0 后置自查 — `ui_style.py` 菜单规则去重）
+
+**触发原因**：v1.5.0 发布后用户要求再做一次完整自查；自查中发现 `ui_style.py` 中 `MENU_QSS` 和 `COMMON_QSS` 各写了一份完全相同的 QMenu 规则（30 行重复），属于上一轮提取 `MENU_QSS` 时收尾不干净。功能正常但维护性差，用户确认顺手清理。
+
+**修改内容**：
+1. `ui_style.py` — 新增私有常量 `_MENU_RULES` 作为单一来源；`COMMON_QSS` 末尾改为 `+ _MENU_RULES`；`MENU_QSS` 改为 `QWidget` 字体规则 + `_MENU_RULES`。功能等价，消除重复。
+2. `project-log/05-current-status.md`、`project-log/06-dev-log.md` — 记录本次小修。
+
+**遇到的问题**：无。
+
+**解决方式**：抽取共享字符串片段，两份 QSS 都引用。
+
+**验证方式**：
+- 运行 `uv run python -m py_compile main.py main_window.py edit_dialog.py settings_dialog.py tray.py profile_manager.py network_controller.py update_manager.py ui_style.py scripts/build.py scripts/generate_icon.py`。
+- 实例化 `MainWindow` / `EditDialog` / `SettingsDialog` / `TrayIcon`，确认 stylesheet 都正常应用。
+- 断言：`COMMON_QSS` 和 `MENU_QSS` 各只出现 1 次 `QMenu::item:selected`（不再重复）；`MENU_QSS` 不包含 `QPushButton / QLineEdit / QGroupBox / QRadioButton / QCheckBox / QComboBox / QFrame` 等表单控件规则。
+
+**验证结果**：
+- 静态编译通过。
+- 实例化通过。
+- 两份 QSS 都只含一份 QMenu 规则；`MENU_QSS` 不含表单控件样式。
+
+**本地产物清理**：
+- 已清理 `__pycache__/`。
+
+---
+
 ## 2026-06-19（评审发现的 14 项 bug / 优化批量修复）
 
 **触发原因**：用户要求对全项目（不仅是 6-18 UI 改造）做一次完整评审，并把所有"确定是 bug 或可优化项"一次修完。本轮共 14 项，覆盖窗口生命周期、单实例检测、网络切换 settle、配色统一、首次启动阻塞、PowerShell 调用次数等。

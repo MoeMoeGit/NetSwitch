@@ -2,8 +2,8 @@
 
 > **最后更新**：2026-06-19
 > **最后更新人**：Claude
-> **最近开发日志**：`06-dev-log.md` 中的 2026-06-19（评审发现的 14 项 bug / 优化批量修复）
-> **当前可信度**：本轮代码已通过静态编译和组件实例化检查；网络切换、DHCP settle 修复、首次启动后台导入仍需 Windows 管理员环境实机回归
+> **最近开发日志**：`06-dev-log.md` 中的 2026-06-19（v1.5.0 后置自查 — `ui_style.py` 菜单规则去重）
+> **当前可信度**：本轮代码已通过静态编译和组件实例化检查；v1.5.0 主线修复仍需 Windows 管理员环境实机回归
 
 ## 当前版本
 
@@ -57,6 +57,7 @@
   - `get_current_ip_config` 4 次串行 PowerShell → 单次 `ConvertTo-Json` 批量获取，节省 ~600ms / apply。
   - `EditDialog` 切换字段显示时 `adjustSize` 引发上下抖动 → 改为只增高的 `_grow_to_fit`。
   - 首次启动同步调用 PowerShell 检测网络阻塞托盘出现 → 改为后台 `_FirstDetectWorker`，托盘立即可见。
+- v1.5.0 后置自查微调：`ui_style.py` 中 `MENU_QSS` 与 `COMMON_QSS` 共享私有 `_MENU_RULES` 片段，消除 QMenu 规则重复定义（功能等价，仅去重）。
 
 ## 进行中
 

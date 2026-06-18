@@ -176,51 +176,37 @@ QScrollArea {{
 }}
 """
 
-# 菜单样式单独抽出，便于 QSystemTrayIcon 的 QMenu 复用而无需挂载完整表单样式。
+# 菜单样式抽出独立片段，让 COMMON_QSS 和 MENU_QSS 共享同一份，避免重复维护两份。
+_MENU_RULES = f"""
+QMenu {{
+    background: {SURFACE_STRONG};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 6px;
+}}
+
+QMenu::item {{
+    padding: 7px 24px 7px 12px;
+    border-radius: 6px;
+}}
+
+QMenu::item:selected {{
+    background: {ACCENT_SOFT};
+    color: {TEXT};
+}}
+"""
+
+# 主样式表附带菜单样式
+COMMON_QSS = COMMON_QSS + _MENU_RULES
+
+# 托盘菜单专用样式：QWidget 字体规则 + 菜单本体；不挂表单/按钮等控件样式
 MENU_QSS = f"""
 QWidget {{
     font-family: {FONT_FAMILY};
     color: {TEXT};
     font-size: 12px;
 }}
-
-QMenu {{
-    background: {SURFACE_STRONG};
-    border: 1px solid {BORDER};
-    border-radius: 8px;
-    padding: 6px;
-}}
-
-QMenu::item {{
-    padding: 7px 24px 7px 12px;
-    border-radius: 6px;
-}}
-
-QMenu::item:selected {{
-    background: {ACCENT_SOFT};
-    color: {TEXT};
-}}
-"""
-
-# 主样式表附带菜单样式，使 COMMON_QSS 单独使用时菜单也美观
-COMMON_QSS = COMMON_QSS + f"""
-QMenu {{
-    background: {SURFACE_STRONG};
-    border: 1px solid {BORDER};
-    border-radius: 8px;
-    padding: 6px;
-}}
-
-QMenu::item {{
-    padding: 7px 24px 7px 12px;
-    border-radius: 6px;
-}}
-
-QMenu::item:selected {{
-    background: {ACCENT_SOFT};
-    color: {TEXT};
-}}
-"""
+""" + _MENU_RULES
 
 
 def polish(widget):
