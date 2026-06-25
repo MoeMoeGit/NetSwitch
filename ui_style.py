@@ -48,6 +48,18 @@ QGroupBox {{
     border-radius: 8px;
 }}
 
+QFrame#sectionPanel {{
+    background: {SURFACE_STRONG};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+}}
+
+QLabel#sectionTitle {{
+    color: {TEXT_SECONDARY};
+    font-size: 12px;
+    font-weight: 600;
+}}
+
 QGroupBox {{
     margin-top: 12px;
     padding: 14px 12px 12px 12px;
@@ -164,10 +176,34 @@ QCheckBox {{
     color: {TEXT};
 }}
 
-QRadioButton::indicator,
 QCheckBox::indicator {{
     width: 16px;
     height: 16px;
+}}
+
+QRadioButton::indicator {{
+    width: 15px;
+    height: 15px;
+    border-radius: 8px;
+    border: 1.5px solid #C2CCD6;
+    background: {SURFACE_STRONG};
+}}
+
+QRadioButton::indicator:hover {{
+    border-color: {BORDER_FOCUS};
+}}
+
+QRadioButton::indicator:checked {{
+    border-color: {ACCENT};
+    background: qradialgradient(
+        cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {ACCENT}, stop:0.45 {ACCENT}, stop:0.55 transparent
+    );
+}}
+
+QRadioButton::indicator:disabled {{
+    border-color: #E1E7EE;
+    background: {SURFACE_SOFT};
 }}
 
 QScrollArea {{

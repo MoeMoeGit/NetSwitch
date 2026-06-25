@@ -84,6 +84,9 @@ class ProfileCard(QWidget):
         self.setFixedHeight(64)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
+        # 不依赖 Qt 的 WM_CONTEXTMENU 合成（在某些情况下非激活卡片收不到
+        # contextMenuEvent），改为在 mousePressEvent 里直接处理右键，最稳妥。
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self._update_style()
 
     @property
@@ -177,7 +180,7 @@ class ProfileCard(QWidget):
         painter.setPen(QPen(border, 0.5))
         painter.drawPath(path)
 
-        # 激活中：左侧绿色竖线
+        # 已激活：左侧绿色竖线
         content_left = 16
         if self._is_active:
             bar = QPainterPath()
@@ -220,9 +223,9 @@ class ProfileCard(QWidget):
         painter.drawText(content_left, 36, w - content_left - 80, 18,
                          Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, sub)
 
-        # 激活中标签
+        # 已激活标签（稳态结果，区别于切换中的"切换中…"瞬态）
         if self._is_active and not self._result_text:
-            tag_text = "激活中"
+            tag_text = "已激活"
             tag_font = QFont("Microsoft YaHei UI", 10)
             painter.setFont(tag_font)
             tag_w = painter.fontMetrics().horizontalAdvance(tag_text) + 14
@@ -257,17 +260,18 @@ class ProfileCard(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.profile_id)
+        elif event.button() == Qt.MouseButton.RightButton:
+            # 右键也选中该卡，保证后续菜单操作目标正确
+            self.clicked.emit(self.profile_id)
+            self._show_context_menu(event.globalPosition().toPoint())
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.double_clicked.emit(self.profile_id)
 
-    def contextMenuEvent(self, event):
+    def _show_context_menu(self, global_pos):
         menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { min-width: 120px; }"
-            "QMenu::item { padding: 6px 24px 6px 12px; }"
-        )
+        menu.setMinimumWidth(120)
         is_locked = self.profile.get("locked", False)
 
         act_activate = menu.addAction("激活")
@@ -278,17 +282,21 @@ class ProfileCard(QWidget):
 
         act_rename = menu.addAction("重命名")
         act_rename.setEnabled(not is_locked)
+        if is_locked:
+            act_rename.setToolTip("默认方案不可重命名")
         act_rename.triggered.connect(self.start_rename)
 
         menu.addSeparator()
 
         act_delete = menu.addAction("删除")
         act_delete.setEnabled(not is_locked)
-        if not is_locked:
+        if is_locked:
+            act_delete.setToolTip("默认方案不可删除")
+        elif not is_locked:
             act_delete.setForeground(QColor(COLOR_RED_TEXT))
         act_delete.triggered.connect(lambda: self.delete_requested.emit(self.profile_id))
 
-        menu.exec(event.globalPos())
+        menu.exec(global_pos)
 
 
 # ── 主窗口 ──

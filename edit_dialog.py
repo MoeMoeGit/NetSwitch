@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QComboBox, QRadioButton, QPushButton, QGroupBox, QFormLayout,
+    QComboBox, QRadioButton, QPushButton, QFormLayout,
     QButtonGroup, QMessageBox, QFrame,
 )
 from PyQt6.QtCore import Qt
@@ -31,11 +31,11 @@ class EditDialog(QDialog):
         ui_style.apply_common_style(self)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(10)
 
         header = QLabel(title)
-        header.setFont(QFont("Microsoft YaHei UI", 17, QFont.Weight.DemiBold))
+        header.setFont(QFont("Microsoft YaHei UI", 16, QFont.Weight.DemiBold))
         layout.addWidget(header)
 
         subtitle = QLabel("配置当前优先网卡的 IP、网关和 DNS。")
@@ -43,8 +43,8 @@ class EditDialog(QDialog):
         layout.addWidget(subtitle)
 
         # 基础信息
-        profile_box = QGroupBox("基础信息")
-        profile_form = self._make_form(profile_box)
+        profile_panel, profile_v = self._section("基础信息", layout)
+        profile_form = self._make_form(None)
 
         self.edit_name = QLineEdit()
         self.edit_name.setPlaceholderText("例如：公司网络 / 家庭软路由")
@@ -54,13 +54,10 @@ class EditDialog(QDialog):
         self.edit_remark = QLineEdit()
         self.edit_remark.setPlaceholderText("备注，可选")
         profile_form.addRow("备注", self.edit_remark)
-        layout.addWidget(profile_box)
+        profile_v.addLayout(profile_form)
 
         # IP 配置
-        ip_box = QGroupBox("IP 配置")
-        ip_layout = QVBoxLayout(ip_box)
-        ip_layout.setContentsMargins(12, 16, 12, 12)
-        ip_layout.setSpacing(10)
+        ip_panel, ip_v = self._section("IP 配置", layout)
 
         ip_mode_layout = QHBoxLayout()
         ip_mode_layout.setSpacing(18)
@@ -73,7 +70,7 @@ class EditDialog(QDialog):
         ip_mode_layout.addWidget(self.radio_dhcp)
         ip_mode_layout.addWidget(self.radio_static)
         ip_mode_layout.addStretch()
-        ip_layout.addLayout(ip_mode_layout)
+        ip_v.addLayout(ip_mode_layout)
 
         self.ip_fields_widget = QFrame()
         ip_form = self._make_form(self.ip_fields_widget)
@@ -104,14 +101,10 @@ class EditDialog(QDialog):
         self.edit_gateway.textChanged.connect(self._validate)
         ip_form.addRow("默认网关", self.edit_gateway)
 
-        ip_layout.addWidget(self.ip_fields_widget)
-        layout.addWidget(ip_box)
+        ip_v.addWidget(self.ip_fields_widget)
 
         # DNS 配置
-        dns_box = QGroupBox("DNS 配置")
-        dns_layout = QVBoxLayout(dns_box)
-        dns_layout.setContentsMargins(12, 16, 12, 12)
-        dns_layout.setSpacing(10)
+        dns_panel, dns_v = self._section("DNS 配置", layout)
 
         dns_mode_layout = QHBoxLayout()
         dns_mode_layout.setSpacing(18)
@@ -124,7 +117,7 @@ class EditDialog(QDialog):
         dns_mode_layout.addWidget(self.radio_dns_auto)
         dns_mode_layout.addWidget(self.radio_dns_manual)
         dns_mode_layout.addStretch()
-        dns_layout.addLayout(dns_mode_layout)
+        dns_v.addLayout(dns_mode_layout)
 
         self.dns_fields_widget = QFrame()
         dns_form = self._make_form(self.dns_fields_widget)
@@ -139,8 +132,7 @@ class EditDialog(QDialog):
         self.edit_dns_secondary.textChanged.connect(self._validate)
         dns_form.addRow("备用 DNS", self.edit_dns_secondary)
 
-        dns_layout.addWidget(self.dns_fields_widget)
-        layout.addWidget(dns_box)
+        dns_v.addWidget(self.dns_fields_widget)
 
         # 底部按钮
         btn_layout = QHBoxLayout()
@@ -175,13 +167,37 @@ class EditDialog(QDialog):
             self._set_read_only()
 
         self._validate()
+        # 隐藏字段后，主布局对各分区面板的 sizeHint 缓存可能仍是字段可见时的旧值，
+        # 导致 adjustSize 把弹窗撑高、多出的空间被标题/副标题 Label 纵向吸收，
+        # 表现为标题行上下特别宽。强制刷新各面板几何后再 adjustSize。
+        lay = self.layout()
+        for i in range(lay.count()):
+            w = lay.itemAt(i).widget()
+            if w is not None:
+                w.updateGeometry()
+        lay.activate()
         self.adjustSize()
+
+    def _section(self, title, parent_layout):
+        """统一分区：标题 Label + 带边框的白色面板。返回 (面板, 内部 QVBoxLayout)。"""
+        panel = QFrame()
+        panel.setObjectName("sectionPanel")
+        v = QVBoxLayout(panel)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(8)
+
+        lbl = QLabel(title)
+        lbl.setObjectName("sectionTitle")
+        v.addWidget(lbl)
+
+        parent_layout.addWidget(panel)
+        return panel, v
 
     def _make_form(self, parent):
         form = QFormLayout(parent)
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(9)
+        form.setVerticalSpacing(8)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
         return form
