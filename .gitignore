@@ -45,3 +45,7 @@ installer_output.iss
 # Claude Code
 .claude/
 
+
+# Additional AI tools
+.mimocode/
+.agents/
